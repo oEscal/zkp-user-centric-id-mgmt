@@ -10,6 +10,7 @@ from utils import ZKP_IdP
 
 
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
+NUM_ITERATIONS = 100
 
 
 class IdP(object):
@@ -20,7 +21,7 @@ class IdP(object):
 			                             OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
 		cherrypy.response.cookie['id'] = saml_request.id
 		zkp_values[saml_request.id] = ZKP_IdP()
-		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate?id={saml_request.id}", 307)
+		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
@@ -28,11 +29,18 @@ class IdP(object):
 		id = kwargs['id']
 		challenge: bytes = kwargs['nonce'].encode()
 		current_zkp = zkp_values[id]
-		if 'username' in kwargs:
-			current_zkp.username = kwargs['username']
-			current_zkp.password = get_user(kwargs['username'])[0].encode()
+		if current_zkp.iteration < 2:
+			if 'username' in kwargs:
+				current_zkp.username = kwargs['username']
+				current_zkp.password = get_user(kwargs['username'])[0].encode()
+		else:
+			current_zkp.verify_challenge_response(int(kwargs['response']))
+
 		challenge_response = current_zkp.response(challenge)
 		nonce = current_zkp.create_challenge()
+
+		if current_zkp.iteration >= NUM_ITERATIONS:
+			pass
 
 		return {
 			'nonce': nonce,
