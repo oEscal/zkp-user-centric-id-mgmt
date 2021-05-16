@@ -12,7 +12,7 @@ saml_settings = {
 	'idp': {
 		'entityId': "http://127.0.0.1:8082",
 		'singleSignOnService': {
-			'url': "http://127.0.0.1:8082/authenticate",
+			'url': "http://127.0.0.1:8082/login",
 			'binding': "url:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 		}
 	},
@@ -130,10 +130,10 @@ class SP(object):
 		account = self.get_account(True)
 
 		if not os.path.exists('accounts'):
-			os.mkdir('accounts', 666)
+			os.mkdir('accounts')               # 666
 		path = f"accounts/{account}"
 		if not os.path.exists(path):
-			os.mkdir(path, 666)
+			os.mkdir(path)
 		raise cherrypy.HTTPRedirect('/account', status=307)
 
 	@cherrypy.expose
