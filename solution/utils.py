@@ -13,6 +13,8 @@ class ZKP(object):
 	def response(self, challenge: bytes) -> int:
 		# TODO -> VERIFICAR COM O PROF SE A RESPOSTA r A UM CHALLENGE PODE SER UM BYTE
 		self.challenges += challenge
+		print(self.challenges)
+		print(self.iteration)
 		self.iteration += 1
 
 		challenge_response = hash_function(self.challenges, self.password)
@@ -21,7 +23,7 @@ class ZKP(object):
 	def create_challenge(self) -> str:
 		nonce = str(uuid.uuid4()).encode()
 		self.expected_response = self.response(nonce)
-		return str(nonce)
+		return nonce.decode()
 
 
 class ZKP_IdP(ZKP):

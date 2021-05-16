@@ -21,8 +21,8 @@ class HelperApp(object):
 		if cherrypy.request.method == 'GET':
 			return Template(filename='static/authenticate.html').render(id=kwargs['id'])
 		elif cherrypy.request.method == 'POST':
-			for i in range(100):
-				zkp = ZKP(kwargs['password'].encode())
+			zkp = ZKP(kwargs['password'].encode())
+			for i in range(10):
 				nonce = zkp.create_challenge()
 				response = requests.get(f"http://localhost:8082/authenticate", params={
 					'nonce': nonce,
@@ -30,6 +30,7 @@ class HelperApp(object):
 					'username': kwargs['username']
 				})
 				print(response.json())
+				print(zkp.expected_response)
 			# after the ZKP
 			raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
 
