@@ -87,9 +87,7 @@ class SP(object):
 		return {
 			'http_host': request.local.name,
 			'script_name': request.path_info,
-			'server_port': request.local.port,
-			'get_data': request.params.copy(),
-			'post_data': request.params.copy()
+			'server_port': request.local.port
 		}
 
 	def get_account(self, redirect):
@@ -99,25 +97,25 @@ class SP(object):
 		:return:
 		"""
 		cookies = cherrypy.request.cookie
-		if not cookies:
-			if redirect:
-				# raise cherrypy.HTTPRedirect('/login', status=307)
-				req = self.prepare_auth_parameter(cherrypy.request)
-				auth = OneLogin_Saml2_Auth(req, saml_settings)
-				# raise cherrypy.HTTPRedirect('/login', status=307)
-				raise cherrypy.HTTPRedirect(auth.login())
-				# auth.process_response()
-				# errors = auth.get_errors()
-				# if not errors:
-				# 	if auth.is_authenticated():
-				# 		print("Ola")
-				# 		print(auth)
-				# 	else:
-				# 		print("Adeus")
-				# else:
-				# 	print(errors)
-			else:
-				return False
+		# if not cookies:
+		if redirect:
+			# raise cherrypy.HTTPRedirect('/login', status=307)
+			req = self.prepare_auth_parameter(cherrypy.request)
+			auth = OneLogin_Saml2_Auth(req, saml_settings)
+			# raise cherrypy.HTTPRedirect('/login', status=307)
+			raise cherrypy.HTTPRedirect(auth.login())
+			# auth.process_response()
+			# errors = auth.get_errors()
+			# if not errors:
+			# 	if auth.is_authenticated():
+			# 		print("Ola")
+			# 		print(auth)
+			# 	else:
+			# 		print("Adeus")
+			# else:
+			# 	print(errors)
+		else:
+			return False
 		username = cookies['username'].value
 		self.set_cookie(username)  # for keeping the session alive
 		return username

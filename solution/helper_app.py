@@ -45,8 +45,6 @@ class HelperApp(object):
 				challenge: bytes = response.json()['nonce'].encode()
 				challenge_response = zkp.response(challenge)
 				data_send['response'] = challenge_response
-				print(idp_response)
-				print(zkp.expected_response)
 			# after the ZKP
 			raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
 

@@ -1,3 +1,4 @@
+from bitstring import BitArray
 from os import urandom
 import uuid
 
@@ -19,6 +20,7 @@ class ZKP(object):
 			self.iteration += 1
 
 			challenge_response = hash_function(self.challenges, self.password)
+			challenge_response = bin(int(challenge_response.hex(), base=16)).lstrip('0b')
 			return int(challenge_response[self.iteration % len(challenge_response)])
 		else:
 			print("oopsie")
@@ -35,9 +37,11 @@ class ZKP(object):
 
 
 class ZKP_IdP(ZKP):
-	def __init__(self):
+	def __init__(self, saml_request):
 		super().__init__(password=b'')
 		self.username = b''
+		self.saml_request = saml_request
+		self.saml_response = None
 
 
 def hash_function(challenges: bytes, password: bytes) -> bytes:
