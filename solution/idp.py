@@ -24,10 +24,10 @@ BASEDIR = os.path.abspath(os.path.dirname(__file__))
 def full_path(local_file):
     return os.path.join(BASEDIR, local_file)
 
-HOST = 'localhost'
+HOST = '127.0.0.1'
 PORT = 8082
 
-HTTPS = True
+HTTPS = False
 
 if HTTPS:
     BASE = "https://%s:%s" % (HOST, PORT)
@@ -45,7 +45,7 @@ DIGEST_ALG = None
 
 
 CONFIG = {
-    "entityid": "%s/idp.xml" % BASE,
+    "entityid": BASE,
     "description": "My IDP",
     "valid_for": 168,
     "service": {

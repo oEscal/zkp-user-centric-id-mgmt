@@ -1,8 +1,8 @@
-from bitstring import BitArray
 from os import urandom
 import uuid
 
 from cryptography.hazmat.primitives import hashes, hmac
+from saml2.samlp import AuthnRequest
 
 
 class ZKP(object):
@@ -40,7 +40,7 @@ class ZKP_IdP(ZKP):
 	def __init__(self, saml_request):
 		super().__init__(password=b'')
 		self.username = b''
-		self.saml_request = saml_request
+		self.saml_request: AuthnRequest = saml_request
 		self.saml_response = None
 
 

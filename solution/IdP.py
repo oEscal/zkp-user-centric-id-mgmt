@@ -2,6 +2,8 @@ import typing
 
 import cherrypy
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
+from saml2 import BINDING_HTTP_REDIRECT
+from saml2.pack import http_redirect_message, http_form_post_message
 from saml2.samlp import AuthnRequest, authn_request_from_string
 from saml2.config import Config
 from saml2.server import Server
@@ -16,13 +18,14 @@ NUM_ITERATIONS = 10
 
 
 class IdP(object):
+	def __init__(self):
+		self.server = Server("idp")
+
 	@cherrypy.expose
 	def login(self, **kwargs):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
-		cherrypy.response.cookie['id'] = saml_request.id
-		print("ola")
-		print(saml_request)
+		print(kwargs['SAMLRequest'])
 		zkp_values[saml_request.id] = ZKP_IdP(saml_request)
 		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
 
@@ -47,11 +50,10 @@ class IdP(object):
 		conf.entityid = id
 
 		if current_zkp.iteration >= NUM_ITERATIONS*2:
-			server = Server("idp")
-			entity = server.response_args(current_zkp.saml_request)
-			response = server.create_authn_response(identity={'username': current_zkp.username},
-			                                        userid=current_zkp.username,
-			                                        **entity)
+			entity = self.server.response_args(current_zkp.saml_request)
+			response = self.server.create_authn_response(identity={'username': current_zkp.username},
+			                                             userid=current_zkp.username,
+			                                             **entity)
 			current_zkp.saml_response = response
 		return {
 			'nonce': nonce,
@@ -60,14 +62,12 @@ class IdP(object):
 
 	@cherrypy.expose
 	def identity(self, id):
-		# TODO -> set up this
-		print(zkp_values[id].saml_response)
-		# raise cherrypy.HTTPRedirect('/credentials')
-
-	@cherrypy.expose
-	def credentials(self, username):
-		# TODO -> THIS MUST BE SAML
-		raise cherrypy.HTTPRedirect("http://localhost:8081/identity?username=" + username, 307)
+		http_args = \
+			http_form_post_message(message=f"{zkp_values[id].saml_response}",
+			                      location=f"{zkp_values[id].saml_request.assertion_consumer_service_url}",
+			                      typ='SAMLResponse')
+		del zkp_values[id]
+		return dict(http_args)['data']
 
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+import typing
 from pathlib import Path
 import os
 import base64
@@ -5,8 +6,7 @@ import hashlib
 
 import cherrypy
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
-from onelogin.saml2.utils import OneLogin_Saml2_Utils
-
+from onelogin.saml2.response import OneLogin_Saml2_Response
 
 saml_settings = {
 	'idp': {
@@ -22,8 +22,19 @@ saml_settings = {
 			'url': "http://127.0.0.1:8081/identity",
 			'binding': "url:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
 		}
-	}
+	},
+	'strict': False
 }
+
+
+clients_auth: typing.Dict[str, OneLogin_Saml2_Auth] = {}
+
+
+def dumb_validation(*args):
+	return True
+
+
+OneLogin_Saml2_Response.is_valid = dumb_validation
 
 
 class SP(object):
@@ -43,17 +54,18 @@ class SP(object):
 		return open(f"static/{path}", 'r').read()
 
 	@staticmethod
-	def set_cookie(username: str):
+	def set_cookie(name: str, value: str):
 		"""Create a session cookie (insecure, can be forged)
 		The validity is short by design, to force authentications
-		:param username:
+		:param value:
+		:param name:
 		:return:
 		"""
 		cookie = cherrypy.response.cookie
-		cookie['username'] = username
-		cookie['username']['path'] = '/'
-		cookie['username']['max-age'] = '20'
-		cookie['username']['version'] = '1'
+		cookie[name] = value
+		cookie[name]['path'] = '/'
+		cookie[name]['max-age'] = '200'
+		cookie[name]['version'] = '1'
 
 	@staticmethod
 	def account_contents(account: str) -> str:
@@ -87,7 +99,9 @@ class SP(object):
 		return {
 			'http_host': request.local.name,
 			'script_name': request.path_info,
-			'server_port': request.local.port
+			'server_port': request.local.port,
+			'get_data': request.params.copy(),
+			'post_data': request.params.copy()
 		}
 
 	def get_account(self, redirect):
@@ -96,28 +110,34 @@ class SP(object):
 		:param redirect:
 		:return:
 		"""
-		cookies = cherrypy.request.cookie
-		# if not cookies:
-		if redirect:
-			# raise cherrypy.HTTPRedirect('/login', status=307)
+
+		def redirect_to_idp():
 			req = self.prepare_auth_parameter(cherrypy.request)
 			auth = OneLogin_Saml2_Auth(req, saml_settings)
-			# raise cherrypy.HTTPRedirect('/login', status=307)
-			raise cherrypy.HTTPRedirect(auth.login())
-			# auth.process_response()
-			# errors = auth.get_errors()
-			# if not errors:
-			# 	if auth.is_authenticated():
-			# 		print("Ola")
-			# 		print(auth)
-			# 	else:
-			# 		print("Adeus")
-			# else:
-			# 	print(errors)
-		else:
-			return False
-		username = cookies['username'].value
-		self.set_cookie(username)  # for keeping the session alive
+			login = auth.login()
+			login_id = auth.get_last_request_id()
+			clients_auth[login_id] = auth
+			self.set_cookie('sp_saml_id', login_id)
+
+			raise cherrypy.HTTPRedirect(login, status=307)
+
+		cookies = cherrypy.request.cookie
+		# if not cookies:
+		if 'sp_saml_id' not in cookies:
+			if redirect:
+				redirect_to_idp()
+			else:
+				return False
+
+		saml_id = cookies['sp_saml_id'].value
+		if saml_id not in clients_auth or not clients_auth[saml_id].get_attributes():
+			if redirect:
+				redirect_to_idp()
+			else:
+				return False
+
+		username = clients_auth[saml_id].get_attributes()['username'][0]
+		self.set_cookie('sp_saml_id', saml_id)  # for keeping the session alive
 		return username
 
 	@cherrypy.expose
@@ -142,12 +162,24 @@ class SP(object):
 		return self.static_page('login.html')
 
 	@cherrypy.expose
-	def identity(self, username: str):
+	def identity(self, **kwargs):
 		"""Identity provisioning by an IdP
 		:param username:
 		:return:
 		"""
-		self.set_cookie(username)
+		cookies = cherrypy.request.cookie
+		req = self.prepare_auth_parameter(cherrypy.request)
+		auth = OneLogin_Saml2_Auth(req, saml_settings)
+		auth.process_response()
+		errors = auth.get_errors()
+		if not errors:
+			if auth.is_authenticated():
+				clients_auth[cookies['sp_saml_id'].value] = auth
+				return self.account()
+			else:
+				print("Not Authenticated")
+		else:
+			print(f"Error when processing SAML response: {errors}")
 		raise cherrypy.HTTPRedirect('/', status=307)
 
 	@cherrypy.expose
