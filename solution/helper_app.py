@@ -1,5 +1,4 @@
 import requests
-import uuid
 
 import cherrypy
 from mako.template import Template

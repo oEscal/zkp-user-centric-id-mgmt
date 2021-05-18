@@ -14,7 +14,6 @@ class ZKP(object):
 		self.all_ok = True
 
 	def response(self, challenge: bytes) -> int:
-		# TODO -> VERIFICAR COM O PROF SE A RESPOSTA r A UM CHALLENGE PODE SER UM BYTE
 		if self.all_ok:
 			self.challenges += challenge
 			self.iteration += 1

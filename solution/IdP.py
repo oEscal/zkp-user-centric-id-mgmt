@@ -25,7 +25,6 @@ class IdP(object):
 	def login(self, **kwargs):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
-		print(kwargs['SAMLRequest'])
 		zkp_values[saml_request.id] = ZKP_IdP(saml_request)
 		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
 
@@ -66,6 +65,7 @@ class IdP(object):
 			http_form_post_message(message=f"{zkp_values[id].saml_response}",
 			                      location=f"{zkp_values[id].saml_request.assertion_consumer_service_url}",
 			                      typ='SAMLResponse')
+		print(dict(http_args)['data'])
 		del zkp_values[id]
 		return dict(http_args)['data']
 

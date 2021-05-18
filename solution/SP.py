@@ -5,6 +5,7 @@ import base64
 import hashlib
 
 import cherrypy
+from mako.template import Template
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.response import OneLogin_Saml2_Response
 
@@ -167,20 +168,20 @@ class SP(object):
 		:param username:
 		:return:
 		"""
-		cookies = cherrypy.request.cookie
-		req = self.prepare_auth_parameter(cherrypy.request)
-		auth = OneLogin_Saml2_Auth(req, saml_settings)
-		auth.process_response()
-		errors = auth.get_errors()
-		if not errors:
-			if auth.is_authenticated():
-				clients_auth[cookies['sp_saml_id'].value] = auth
-				return self.account()
+		if cherrypy.request.method == 'POST':
+			cookies = cherrypy.request.cookie
+			req = self.prepare_auth_parameter(cherrypy.request)
+			auth = OneLogin_Saml2_Auth(req, saml_settings)
+			auth.process_response()
+			errors = auth.get_errors()
+			if not errors:
+				if auth.is_authenticated():
+					clients_auth[cookies['sp_saml_id'].value] = auth
+				else:
+					print("Not Authenticated")
 			else:
-				print("Not Authenticated")
-		else:
-			print(f"Error when processing SAML response: {errors}")
-		raise cherrypy.HTTPRedirect('/', status=307)
+				print(f"Error when processing SAML response: {errors}")
+		return Template(filename='static/redirect_index.html').render()
 
 	@cherrypy.expose
 	def account(self) -> str:
@@ -231,6 +232,7 @@ class SP(object):
 		return self.account_contents(account)
 
 
-cherrypy.config.update({'server.socket_host': '127.0.0.1',
-                        'server.socket_port': 8081})
-cherrypy.quickstart(SP())
+if __name__ == '__main__':
+	cherrypy.config.update({'server.socket_host': '127.0.0.1',
+                            'server.socket_port': 8081})
+	cherrypy.quickstart(SP())
