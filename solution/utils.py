@@ -2,11 +2,12 @@ from os import urandom
 import uuid
 
 from cryptography.hazmat.primitives import hashes, hmac
+from cryptography.hazmat.primitives.asymmetric import padding
 from saml2.samlp import AuthnRequest
 
 
 class ZKP(object):
-	def __init__(self, password: bytes):
+	def __init__(self, password: bytes, max_iterations: int):
 		self.challenges = b''
 		self.expected_response = -1
 		self.iteration = 0
@@ -47,3 +48,14 @@ def hash_function(challenges: bytes, password: bytes) -> bytes:
 	digest = hmac.HMAC(password, hashes.SHA256())
 	digest.update(challenges)
 	return digest.finalize()
+
+
+def asymmetric_hash():
+	return hashes.SHA256()
+
+
+def asymmetric_padding():
+	return padding.PSS(
+		mgf=padding.MGF1(asymmetric_hash()),
+		salt_length=padding.PSS.MAX_LENGTH
+	)

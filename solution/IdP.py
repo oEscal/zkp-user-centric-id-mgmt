@@ -2,13 +2,12 @@ import typing
 
 import cherrypy
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
-from saml2 import BINDING_HTTP_REDIRECT
-from saml2.pack import http_redirect_message, http_form_post_message
+from saml2.pack import http_form_post_message
 from saml2.samlp import AuthnRequest, authn_request_from_string
 from saml2.config import Config
 from saml2.server import Server
 
-from queries import setup_database, get_user
+from queries import setup_database, get_user, save_user_key
 from utils import ZKP_IdP
 
 
@@ -48,7 +47,7 @@ class IdP(object):
 		conf.attribute_converters = {'username': [current_zkp.username]}
 		conf.entityid = id
 
-		if current_zkp.iteration >= NUM_ITERATIONS*2:
+		if current_zkp.iteration >= NUM_ITERATIONS*2 and current_zkp.all_ok:
 			entity = self.server.response_args(current_zkp.saml_request)
 			response = self.server.create_authn_response(identity={'username': current_zkp.username},
 			                                             userid=current_zkp.username,
@@ -58,6 +57,13 @@ class IdP(object):
 			'nonce': nonce,
 			'response': challenge_response
 		}
+
+	@cherrypy.expose
+	def save_asymmetric(self, id, key):
+		current_zkp = zkp_values[id]
+		if current_zkp.saml_response:
+			save_user_key(id=id, username=current_zkp.username, key=key)
+
 
 	@cherrypy.expose
 	def identity(self, id):
