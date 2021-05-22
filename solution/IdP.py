@@ -59,11 +59,13 @@ class IdP(object):
 		}
 
 	@cherrypy.expose
+	@cherrypy.tools.json_out()
 	def save_asymmetric(self, id, key):
 		current_zkp = zkp_values[id]
+		status = False
 		if current_zkp.saml_response:
-			save_user_key(id=id, username=current_zkp.username, key=key)
-
+			status = save_user_key(id=id, username=current_zkp.username, key=key)
+		return {'status': status}
 
 	@cherrypy.expose
 	def identity(self, id):

@@ -1,13 +1,16 @@
+import os
 from os import urandom
 import uuid
 
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from saml2.samlp import AuthnRequest
 
 
 class ZKP(object):
-	def __init__(self, password: bytes, max_iterations: int):
+	def __init__(self, password: bytes):
 		self.challenges = b''
 		self.expected_response = -1
 		self.iteration = 0
@@ -59,3 +62,24 @@ def asymmetric_padding():
 		mgf=padding.MGF1(asymmetric_hash()),
 		salt_length=padding.PSS.MAX_LENGTH
 	)
+
+
+def create_directory(directory: str):
+	if not os.path.exists(directory):
+		os.mkdir(directory)  # 666
+
+
+def aes_key_derivation(password: bytes, salt: bytes) -> bytes:
+	kdf = PBKDF2HMAC(
+		algorithm=hashes.SHA256(),
+		length=32,
+		salt=salt,
+		iterations=100000
+	)
+	return kdf.derive(password)
+
+
+def aes_cipher(password: bytes, salt: bytes, iv: bytes) -> Cipher:
+	key = aes_key_derivation(password, salt)
+	cipher = Cipher(algorithm=algorithms.AES(key=key), mode=modes.CBC(iv))
+	return cipher
