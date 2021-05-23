@@ -4,7 +4,7 @@ import sqlite3
 DB_NAME = 'idp.db'
 
 
-def get_user(username: str):
+def get_user(username: str) -> tuple:
     with sqlite3.connect(DB_NAME) as con:
         r = con.execute("SELECT password FROM user WHERE username=?",
                       [username])
@@ -20,6 +20,12 @@ def save_user_key(id: str, username: str, key: str) -> bool:
     except Exception as e:
         print(f"Error: {e}")
         return False
+
+
+def get_user_key(id: str, username: str) -> tuple:
+    with sqlite3.connect(DB_NAME) as con:
+        r = con.execute("SELECT value FROM keys WHERE id=? AND user=?", [id, username])
+        return r.fetchone()
 
 
 def setup_database():

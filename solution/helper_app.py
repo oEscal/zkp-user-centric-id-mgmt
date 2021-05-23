@@ -1,3 +1,4 @@
+import base64
 from os import urandom
 
 import requests
@@ -8,10 +9,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from mako.template import Template
 
-from utils import ZKP, create_directory, aes_key_derivation, aes_cipher
+from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash
 
 """
 DÚVIDAS
@@ -35,7 +35,7 @@ class Asymmetric_authentication(object):
         self.username = username
         self.password = password
 
-        self.load_keys()
+        self.id = self.load_keys()
 
     def generate_keys(self):
         self.private_key = rsa.generate_private_key(
@@ -44,7 +44,7 @@ class Asymmetric_authentication(object):
         )
         self.public_key = self.private_key.public_key()
 
-    def load_keys(self):
+    def load_keys(self) -> str:
         try:
             with open(f"{KEYS_DIRECTORY}/{self.username}_secret", "rb") as file:
                 salt = file.read(AES_KEY_SALT_SIZE)
@@ -55,8 +55,8 @@ class Asymmetric_authentication(object):
             secret = decrypter.update(ciphered_secret) + decrypter.finalize()
 
             with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'rb') as file:
-                id = file.readline()
-                time_to_live = file.readline()
+                id = file.readline().decode().rstrip()
+                time_to_live = int(file.readline())
                 pem = file.read()
 
             if time_to_live:
@@ -65,7 +65,7 @@ class Asymmetric_authentication(object):
                     password=secret,
                     backend=default_backend()
                 )
-            print(self.private_key)
+            return id
         except Exception as e:
             print(f"Error: {e}")
 
@@ -87,6 +87,9 @@ class Asymmetric_authentication(object):
             file.write(f"{id}\n".encode())
             file.write(f"{time_to_live}\n".encode())
             file.write(self.get_private_key_bytes(secret))
+
+    def sign(self, data: bytes) -> bytes:
+        return self.private_key.sign(data=data, padding=asymmetric_padding(), algorithm=asymmetric_hash())
 
     def get_private_key_bytes(self, secret: bytes) -> bytes:
         return self.private_key.private_bytes(
@@ -126,7 +129,26 @@ class HelperApp(object):
 
             asymmetric_authentication = Asymmetric_authentication(username=username, password=password)
             if asymmetric_authentication.private_key:
-                pass
+                response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                                        params={
+                                            'id': asymmetric_authentication.id,
+                                            'saml_id': kwargs['id'],
+                                            'username': username
+                                        })
+                if response.status_code == 200:
+                    nonce = response.json()['nonce'].encode()
+                    challenge_response = asymmetric_authentication.sign(nonce)
+                    response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                                            params={
+                                                'saml_id': kwargs['id'],
+                                                'response': base64.urlsafe_b64encode(challenge_response)
+                                            })
+                    if response.status_code == 200:
+                        raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
+                    else:
+                        print(f"Error status: {response.status_code}")
+                else:
+                    print(f"Error status: {response.status_code}")
             else:
                 zkp = ZKP(password)
                 data_send = {

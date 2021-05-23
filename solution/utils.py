@@ -30,7 +30,7 @@ class ZKP(object):
 			return urandom(1)[0]
 
 	def create_challenge(self) -> str:
-		nonce = str(uuid.uuid4()).encode()
+		nonce = create_nonce()
 		self.expected_response = self.response(nonce)
 		return nonce.decode()
 
@@ -51,6 +51,10 @@ def hash_function(challenges: bytes, password: bytes) -> bytes:
 	digest = hmac.HMAC(password, hashes.SHA256())
 	digest.update(challenges)
 	return digest.finalize()
+
+
+def create_nonce() -> bytes:
+	return str(uuid.uuid4()).encode()
 
 
 def asymmetric_hash():

@@ -1,24 +1,35 @@
+import base64
 import typing
 
 import cherrypy
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
 from saml2.pack import http_form_post_message
 from saml2.samlp import AuthnRequest, authn_request_from_string
 from saml2.config import Config
 from saml2.server import Server
 
-from queries import setup_database, get_user, save_user_key
-from utils import ZKP_IdP
-
+from queries import setup_database, get_user, save_user_key, get_user_key
+from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash
 
 # TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
+public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
 NUM_ITERATIONS = 10
 
 
 class IdP(object):
 	def __init__(self):
 		self.server = Server("idp")
+
+	def create_saml_response(self, zkp: ZKP_IdP):
+		entity = self.server.response_args(zkp.saml_request)
+		response = self.server.create_authn_response(identity={'username': zkp.username},
+		                                             userid=zkp.username, **entity)
+		zkp.saml_response = response
 
 	@cherrypy.expose
 	def login(self, **kwargs):
@@ -48,15 +59,43 @@ class IdP(object):
 		conf.entityid = id
 
 		if current_zkp.iteration >= NUM_ITERATIONS*2 and current_zkp.all_ok:
-			entity = self.server.response_args(current_zkp.saml_request)
-			response = self.server.create_authn_response(identity={'username': current_zkp.username},
-			                                             userid=current_zkp.username,
-			                                             **entity)
-			current_zkp.saml_response = response
+			self.create_saml_response(current_zkp)
 		return {
 			'nonce': nonce,
 			'response': challenge_response
 		}
+
+	@cherrypy.expose
+	@cherrypy.tools.json_out()
+	def authenticate_asymmetric(self, **kwargs):
+		saml_id = kwargs['saml_id']
+		if saml_id not in public_key_values:
+			id = kwargs['id']
+			username = kwargs['username']
+
+			public_key_db = get_user_key(id=id, username=username)
+			if len(public_key_db) > 0:
+				zkp_values[saml_id].username = username
+				nonce = create_nonce()
+				public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
+				public_key_values[saml_id] = (public_key, nonce)
+				return {
+					'nonce': nonce.decode()
+				}
+			else:
+				del zkp_values[saml_id]
+				raise cherrypy.HTTPError(424, message="No public key for the given id and username")
+		else:
+			response = base64.urlsafe_b64decode(kwargs['response'])
+
+			public_key, nonce = public_key_values[saml_id]
+			try:
+				public_key.verify(signature=response, data=nonce,
+			                      padding=asymmetric_padding(), algorithm=asymmetric_hash())
+				self.create_saml_response(zkp_values[saml_id])
+			except InvalidSignature:
+				del zkp_values[saml_id]
+				raise cherrypy.HTTPError(401, message="Authentication failed")
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
