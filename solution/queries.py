@@ -11,11 +11,11 @@ def get_user(username: str) -> tuple:
         return r.fetchone()
 
 
-def save_user_key(id: str, username: str, key: str) -> bool:
+def save_user_key(id: str, username: str, key: str, not_valid_after: float) -> bool:
     try:
         with sqlite3.connect(DB_NAME) as con:
-            con.execute("INSERT INTO keys(id, user, value) values(?, ?, ?)",
-                        [id, username, key])
+            con.execute("INSERT INTO keys(id, user, value, not_valid_after) values(?, ?, ?, ?)",
+                        [id, username, key, not_valid_after])
         return True
     except Exception as e:
         print(f"Error: {e}")
@@ -24,7 +24,7 @@ def save_user_key(id: str, username: str, key: str) -> bool:
 
 def get_user_key(id: str, username: str) -> tuple:
     with sqlite3.connect(DB_NAME) as con:
-        r = con.execute("SELECT value FROM keys WHERE id=? AND user=?", [id, username])
+        r = con.execute("SELECT value, not_valid_after FROM keys WHERE id=? AND user=?", [id, username])
         return r.fetchone()
 
 
@@ -38,6 +38,7 @@ def setup_database():
                     "id text primary key,"
                     "user text not null,"
                     "value text not null,"
+                    "not_valid_after real not null,"
                     "foreign key(user) references user(username)"
                     ")")
         con.execute("CREATE TABLE if not exists sessions ("

@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timedelta
 from os import urandom
 
 import requests
@@ -56,10 +57,10 @@ class Asymmetric_authentication(object):
 
             with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'rb') as file:
                 id = file.readline().decode().rstrip()
-                time_to_live = int(file.readline())
+                time_to_live = float(file.readline())
                 pem = file.read()
 
-            if time_to_live:
+            if True: # time_to_live < datetime.now().timestamp():
                 self.private_key = load_pem_private_key(
                     data=pem,
                     password=secret,
@@ -69,7 +70,7 @@ class Asymmetric_authentication(object):
         except Exception as e:
             print(f"Error: {e}")
 
-    def save_key(self, id: str, time_to_live: int):
+    def save_key(self, id: str, time_to_live: float):
         secret = urandom(32)
         create_directory(KEYS_DIRECTORY)
 
@@ -85,7 +86,7 @@ class Asymmetric_authentication(object):
         # save the private key protected with the secret
         with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'wb') as file:
             file.write(f"{id}\n".encode())
-            file.write(f"{time_to_live}\n".encode())
+            file.write(f"{(datetime.now() + timedelta(minutes=time_to_live)).timestamp()}\n".encode())
             file.write(self.get_private_key_bytes(secret))
 
     def sign(self, data: bytes) -> bytes:
@@ -179,7 +180,7 @@ class HelperApp(object):
 
                 response = response.json()
                 if 'status' in response and response['status']:
-                    asymmetric_authentication.save_key(id=kwargs['id'], time_to_live=123)
+                    asymmetric_authentication.save_key(id=kwargs['id'], time_to_live=float(response['ttl']))
 
                 # after the ZKP
                 raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")

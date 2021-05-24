@@ -1,5 +1,6 @@
 import base64
 import typing
+from datetime import datetime, timedelta
 
 import cherrypy
 from cryptography.exceptions import InvalidSignature
@@ -19,6 +20,7 @@ from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
 NUM_ITERATIONS = 10
+KEYS_TIME_TO_LIVE = 2       # minutes
 
 
 class IdP(object):
@@ -75,13 +77,17 @@ class IdP(object):
 
 			public_key_db = get_user_key(id=id, username=username)
 			if len(public_key_db) > 0:
-				zkp_values[saml_id].username = username
-				nonce = create_nonce()
-				public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
-				public_key_values[saml_id] = (public_key, nonce)
-				return {
-					'nonce': nonce.decode()
-				}
+				if public_key_db[1] > datetime.now().timestamp():           # verify if the key is not expired
+					zkp_values[saml_id].username = username
+					nonce = create_nonce()
+					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
+					public_key_values[saml_id] = (public_key, nonce)
+					return {
+						'nonce': nonce.decode()
+					}
+				else:
+					del zkp_values[saml_id]
+					raise cherrypy.HTTPError(410, message="Expired key")
 			else:
 				del zkp_values[saml_id]
 				raise cherrypy.HTTPError(424, message="No public key for the given id and username")
@@ -103,8 +109,13 @@ class IdP(object):
 		current_zkp = zkp_values[id]
 		status = False
 		if current_zkp.saml_response:
-			status = save_user_key(id=id, username=current_zkp.username, key=key)
-		return {'status': status}
+			status = save_user_key(id=id, username=current_zkp.username,
+			                       key=key,
+			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
+		return {
+			'status': status,
+			'ttl': KEYS_TIME_TO_LIVE
+		}
 
 	@cherrypy.expose
 	def identity(self, id):
