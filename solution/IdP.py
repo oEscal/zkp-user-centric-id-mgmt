@@ -38,7 +38,8 @@ class IdP(object):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
 		zkp_values[saml_request.id] = ZKP_IdP(saml_request)
-		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
+		raise cherrypy.HTTPRedirect(
+			f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
@@ -86,10 +87,8 @@ class IdP(object):
 						'nonce': nonce.decode()
 					}
 				else:
-					del zkp_values[saml_id]
 					raise cherrypy.HTTPError(410, message="Expired key")
 			else:
-				del zkp_values[saml_id]
 				raise cherrypy.HTTPError(424, message="No public key for the given id and username")
 		else:
 			response = base64.urlsafe_b64decode(kwargs['response'])
@@ -101,6 +100,7 @@ class IdP(object):
 				self.create_saml_response(zkp_values[saml_id])
 			except InvalidSignature:
 				del zkp_values[saml_id]
+				del public_key_values[saml_id]
 				raise cherrypy.HTTPError(401, message="Authentication failed")
 
 	@cherrypy.expose

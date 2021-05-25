@@ -60,7 +60,7 @@ class Asymmetric_authentication(object):
                 time_to_live = float(file.readline())
                 pem = file.read()
 
-            if True: # time_to_live < datetime.now().timestamp():
+            if True:        # time_to_live < datetime.now().timestamp():
                 self.private_key = load_pem_private_key(
                     data=pem,
                     password=secret,
@@ -118,6 +118,62 @@ class HelperApp(object):
     def index(self):
         raise cherrypy.HTTPRedirect('/authenticate')
 
+    def asymmetric_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
+                        password: bytes, saml_id: str):
+        response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                                params={
+                                    'id': asymmetric_authentication.id,
+                                    'saml_id': saml_id,
+                                    'username': username
+                                })
+        if response.status_code == 200:
+            nonce = response.json()['nonce'].encode()
+            challenge_response = asymmetric_authentication.sign(nonce)
+            response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                                    params={
+                                        'saml_id': saml_id,
+                                        'response': base64.urlsafe_b64encode(challenge_response)
+                                    })
+            if response.status_code != 200:
+                print(f"Error status: {response.status_code}")
+                self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
+        else:
+            print(f"Error status: {response.status_code}")
+            self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
+
+    def zkp_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
+                 password: bytes, saml_id: str):
+        zkp = ZKP(password)
+        data_send = {
+            'nonce': '',
+            'id': saml_id
+        }
+        for i in range(self.iterations):
+            data_send['nonce'] = zkp.create_challenge()
+            response = requests.get(f"http://localhost:8082/authenticate",
+                                    params={**data_send,
+                                            **({'username': username} if zkp.iteration < 2 else {})})
+
+            # verify if response to challenge is correct
+            idp_response = response.json()['response']
+            zkp.verify_challenge_response(idp_response)
+
+            # create both response to the IdP challenge and new challenge to the IdP
+            challenge: bytes = response.json()['nonce'].encode()
+            challenge_response = zkp.response(challenge)
+            data_send['response'] = challenge_response
+
+        # generate asymmetric keys
+        asymmetric_authentication.generate_keys()
+        response = requests.post("http://localhost:8082/save_asymmetric", data={
+            'id': saml_id,
+            'key': asymmetric_authentication.get_public_key_str()
+        })
+
+        response = response.json()
+        if 'status' in response and response['status']:
+            asymmetric_authentication.save_key(id=saml_id, time_to_live=float(response['ttl']))
+
     @cherrypy.expose
     def authenticate(self, **kwargs):
         if cherrypy.request.method == 'GET':
@@ -130,60 +186,11 @@ class HelperApp(object):
 
             asymmetric_authentication = Asymmetric_authentication(username=username, password=password)
             if asymmetric_authentication.private_key:
-                response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
-                                        params={
-                                            'id': asymmetric_authentication.id,
-                                            'saml_id': kwargs['id'],
-                                            'username': username
-                                        })
-                if response.status_code == 200:
-                    nonce = response.json()['nonce'].encode()
-                    challenge_response = asymmetric_authentication.sign(nonce)
-                    response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
-                                            params={
-                                                'saml_id': kwargs['id'],
-                                                'response': base64.urlsafe_b64encode(challenge_response)
-                                            })
-                    if response.status_code == 200:
-                        raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
-                    else:
-                        print(f"Error status: {response.status_code}")
-                else:
-                    print(f"Error status: {response.status_code}")
+                self.asymmetric_auth(asymmetric_authentication, username=username, password=password,
+                                     saml_id=kwargs['id'])
             else:
-                zkp = ZKP(password)
-                data_send = {
-                    'nonce': '',
-                    'id': kwargs['id']
-                }
-                for i in range(self.iterations):
-                    data_send['nonce'] = zkp.create_challenge()
-                    response = requests.get(f"http://localhost:8082/authenticate",
-                                            params={**data_send,
-                                                    **({'username': username} if zkp.iteration < 2 else {})})
-
-                    # verify if response to challenge is correct
-                    idp_response = response.json()['response']
-                    zkp.verify_challenge_response(idp_response)
-
-                    # create both response to the IdP challenge and new challenge to the IdP
-                    challenge: bytes = response.json()['nonce'].encode()
-                    challenge_response = zkp.response(challenge)
-                    data_send['response'] = challenge_response
-
-                # generate asymmetric keys
-                asymmetric_authentication.generate_keys()
-                response = requests.post("http://localhost:8082/save_asymmetric", data={
-                    'id': kwargs['id'],
-                    'key': asymmetric_authentication.get_public_key_str()
-                })
-
-                response = response.json()
-                if 'status' in response and response['status']:
-                    asymmetric_authentication.save_key(id=kwargs['id'], time_to_live=float(response['ttl']))
-
-                # after the ZKP
-                raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
+                self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=kwargs['id'])
+            raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
 
 
 if __name__ == '__main__':
