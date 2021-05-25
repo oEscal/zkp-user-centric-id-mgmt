@@ -40,11 +40,12 @@ class ZKP(object):
 
 
 class ZKP_IdP(ZKP):
-	def __init__(self, saml_request):
+	def __init__(self, saml_request: AuthnRequest, max_iterations: int):
 		super().__init__(password=b'')
 		self.username = b''
 		self.saml_request: AuthnRequest = saml_request
 		self.saml_response = None
+		self.max_iterations = max_iterations
 
 
 def hash_function(challenges: bytes, password: bytes) -> bytes:
@@ -87,3 +88,7 @@ def aes_cipher(password: bytes, salt: bytes, iv: bytes) -> Cipher:
 	key = aes_key_derivation(password, salt)
 	cipher = Cipher(algorithm=algorithms.AES(key=key), mode=modes.CBC(iv))
 	return cipher
+
+
+def overlap_intervals(min1, max1, min2, max2) -> bool:
+	return min2 <= min1 <= max2 or min1 <= min2 <= max1

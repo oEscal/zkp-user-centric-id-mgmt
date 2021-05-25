@@ -1,6 +1,7 @@
 import base64
 from datetime import datetime, timedelta
 from os import urandom
+import random
 
 import requests
 
@@ -12,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPriva
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from mako.template import Template
 
-from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash
+from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash, overlap_intervals
 
 """
 DÚVIDAS
@@ -26,6 +27,9 @@ DÚVIDAS
 KEYS_DIRECTORY = 'helper_keys/'
 INITIALIZATION_VECTOR_SIZE = 16
 AES_KEY_SALT_SIZE = 16
+
+MIN_ITERATIONS_ALLOWED = 10
+MAX_ITERATIONS_ALLOWED = 15
 
 
 class Asymmetric_authentication(object):
@@ -150,18 +154,24 @@ class HelperApp(object):
         }
         for i in range(self.iterations):
             data_send['nonce'] = zkp.create_challenge()
-            response = requests.get(f"http://localhost:8082/authenticate",
-                                    params={**data_send,
-                                            **({'username': username} if zkp.iteration < 2 else {})})
+            response = requests.get(
+                f"http://localhost:8082/authenticate",
+                params={**data_send,
+                        **({'iterations': self.iterations} if zkp.iteration < 2 else {})}
+            )
 
-            # verify if response to challenge is correct
-            idp_response = response.json()['response']
-            zkp.verify_challenge_response(idp_response)
+            if response.status_code == 200:
+                # verify if response to challenge is correct
+                idp_response = response.json()['response']
+                zkp.verify_challenge_response(idp_response)
 
-            # create both response to the IdP challenge and new challenge to the IdP
-            challenge: bytes = response.json()['nonce'].encode()
-            challenge_response = zkp.response(challenge)
-            data_send['response'] = challenge_response
+                # create both response to the IdP challenge and new challenge to the IdP
+                challenge: bytes = response.json()['nonce'].encode()
+                challenge_response = zkp.response(challenge)
+                data_send['response'] = challenge_response
+            else:
+                return Template(filename='static/error.html').render(
+                    message=f"Received the status code <{response.status_code}: {response.reason}> from the IdP")
 
         # generate asymmetric keys
         asymmetric_authentication.generate_keys()
@@ -177,8 +187,16 @@ class HelperApp(object):
     @cherrypy.expose
     def authenticate(self, **kwargs):
         if cherrypy.request.method == 'GET':
-            self.iterations = int(kwargs['iterations'])
-            print(self.iterations)
+            max_iterations = int(kwargs['max_iterations'])
+            min_iterations = int(kwargs['min_iterations'])
+            if overlap_intervals(MIN_ITERATIONS_ALLOWED, MAX_ITERATIONS_ALLOWED, min_iterations, max_iterations):
+                self.iterations = random.randint(max(MIN_ITERATIONS_ALLOWED, min_iterations),
+                                                 min(MAX_ITERATIONS_ALLOWED, max_iterations))
+            else:
+                return Template(filename='static/error.html').render(
+                    message='The range of allowed iterations received from the IdP is incompatible with the range '
+                            'allowed by the local app. A possible cause for this is the IdP we are contacting is not'
+                            'a trusted one!')
             return Template(filename='static/authenticate.html').render(id=kwargs['id'])
         elif cherrypy.request.method == 'POST':
             username = kwargs['username']
@@ -189,7 +207,10 @@ class HelperApp(object):
                 self.asymmetric_auth(asymmetric_authentication, username=username, password=password,
                                      saml_id=kwargs['id'])
             else:
-                self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=kwargs['id'])
+                template = self.zkp_auth(asymmetric_authentication,
+                                         username=username, password=password, saml_id=kwargs['id'])
+                if template:
+                    return template
             raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
 
 

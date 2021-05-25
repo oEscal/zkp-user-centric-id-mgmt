@@ -19,7 +19,8 @@ from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash
 # TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
-NUM_ITERATIONS = 10
+MAX_ITERATIONS_ALLOWED = 30
+MIN_ITERATIONS_ALLOWED = 10
 KEYS_TIME_TO_LIVE = 2       # minutes
 
 
@@ -37,9 +38,11 @@ class IdP(object):
 	def login(self, **kwargs):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
-		zkp_values[saml_request.id] = ZKP_IdP(saml_request)
-		raise cherrypy.HTTPRedirect(
-			f"http://zkp_helper_app:1080/authenticate?iterations={NUM_ITERATIONS}&id={saml_request.id}", 307)
+		zkp_values[saml_request.id] = ZKP_IdP(saml_request=saml_request, max_iterations=MAX_ITERATIONS_ALLOWED)
+		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate"
+		                            f"?max_iterations={MAX_ITERATIONS_ALLOWED}"
+		                            f"&min_iterations={MIN_ITERATIONS_ALLOWED}"
+		                            f"&id={saml_request.id}", 307)
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
@@ -51,6 +54,16 @@ class IdP(object):
 			if 'username' in kwargs:
 				current_zkp.username = kwargs['username']
 				current_zkp.password = get_user(kwargs['username'])[0].encode()
+			else:
+				del current_zkp
+				raise cherrypy.HTTPError(400, message='The first request to this endpoint must have the parameter username')
+			if 'iterations' in kwargs:
+				iterations = int(kwargs['iterations'])
+				if MIN_ITERATIONS_ALLOWED <= iterations <= MAX_ITERATIONS_ALLOWED:
+					current_zkp.max_iterations = iterations
+				else:
+					del current_zkp
+					raise cherrypy.HTTPError(406, message='The number of iterations does not met the defined range')
 		else:
 			current_zkp.verify_challenge_response(int(kwargs['response']))
 
@@ -61,7 +74,7 @@ class IdP(object):
 		conf.attribute_converters = {'username': [current_zkp.username]}
 		conf.entityid = id
 
-		if current_zkp.iteration >= NUM_ITERATIONS*2 and current_zkp.all_ok:
+		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
 			self.create_saml_response(current_zkp)
 		return {
 			'nonce': nonce,
