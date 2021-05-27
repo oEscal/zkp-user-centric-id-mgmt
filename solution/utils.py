@@ -1,9 +1,13 @@
+import base64
+import json
 import os
+import typing
 from os import urandom
 import uuid
+from requests.models import PreparedRequest
 
-from cryptography.hazmat.primitives import hashes, hmac
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes, hmac, padding
+from cryptography.hazmat.primitives.asymmetric import padding as padding_asymmetric
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from saml2.samlp import AuthnRequest
@@ -39,13 +43,45 @@ class ZKP(object):
 			self.all_ok &= response == self.expected_response
 
 
-class ZKP_IdP(ZKP):
-	def __init__(self, saml_request: AuthnRequest, max_iterations: int):
-		super().__init__(password=b'')
+class Cipher_Authentication(object):
+	def __init__(self, key: bytes, iv: bytes):
+		self.key = key
+		self.iv = iv
+
+		self.block_size = algorithms.AES(self.key).block_size
+		self.cipher = aes_cipher(key=self.key, iv=self.iv)
+
+	def decipher_data(self, data: str) -> dict:
+		unpadder = padding.PKCS7(self.block_size).unpadder()
+		decrypter = self.cipher.decryptor()
+		decrypted_data = decrypter.update(base64.urlsafe_b64decode(data)) + decrypter.finalize()
+		return json.loads(unpadder.update(decrypted_data) + unpadder.finalize())
+
+	def cipher_data(self, data: dict) -> str:
+		padder = padding.PKCS7(self.block_size).padder()
+		padded_data = padder.update(json.dumps(data).encode()) + padder.finalize()
+		encryptor = self.cipher.encryptor()
+		return base64.urlsafe_b64encode(encryptor.update(padded_data) + encryptor.finalize()).decode()
+
+
+class ZKP_IdP(ZKP, Cipher_Authentication):
+	def __init__(self, key: bytes, iv: bytes, saml_request: AuthnRequest, max_iterations: int):
+		ZKP.__init__(self, password=b'')
+		Cipher_Authentication.__init__(self, key=key, iv=iv)
 		self.username = b''
 		self.saml_request: AuthnRequest = saml_request
 		self.saml_response = None
 		self.max_iterations = max_iterations
+
+
+def create_get_url(url: str, params: dict = None):
+	prepare = PreparedRequest()
+	prepare.prepare_url(url, params=params if params else {})
+	return prepare.url
+
+
+def overlap_intervals(min1, max1, min2, max2) -> bool:
+	return min2 <= min1 <= max2 or min1 <= min2 <= max1
 
 
 def hash_function(challenges: bytes, password: bytes) -> bytes:
@@ -63,9 +99,9 @@ def asymmetric_hash():
 
 
 def asymmetric_padding():
-	return padding.PSS(
-		mgf=padding.MGF1(asymmetric_hash()),
-		salt_length=padding.PSS.MAX_LENGTH
+	return padding_asymmetric.PSS(
+		mgf=padding_asymmetric.MGF1(asymmetric_hash()),
+		salt_length=padding_asymmetric.PSS.MAX_LENGTH
 	)
 
 
@@ -84,11 +120,6 @@ def aes_key_derivation(password: bytes, salt: bytes) -> bytes:
 	return kdf.derive(password)
 
 
-def aes_cipher(password: bytes, salt: bytes, iv: bytes) -> Cipher:
-	key = aes_key_derivation(password, salt)
+def aes_cipher(key: bytes, iv: bytes) -> Cipher:
 	cipher = Cipher(algorithm=algorithms.AES(key=key), mode=modes.CBC(iv))
 	return cipher
-
-
-def overlap_intervals(min1, max1, min2, max2) -> bool:
-	return min2 <= min1 <= max2 or min1 <= min2 <= max1

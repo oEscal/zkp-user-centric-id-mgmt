@@ -1,6 +1,7 @@
 import base64
 import typing
 from datetime import datetime, timedelta
+from os import urandom
 
 import cherrypy
 from cryptography.exceptions import InvalidSignature
@@ -14,7 +15,7 @@ from saml2.config import Config
 from saml2.server import Server
 
 from queries import setup_database, get_user, save_user_key, get_user_key
-from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash
+from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash, create_get_url
 
 # TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
@@ -38,34 +39,44 @@ class IdP(object):
 	def login(self, **kwargs):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
-		zkp_values[saml_request.id] = ZKP_IdP(saml_request=saml_request, max_iterations=MAX_ITERATIONS_ALLOWED)
-		raise cherrypy.HTTPRedirect(f"http://zkp_helper_app:1080/authenticate"
-		                            f"?max_iterations={MAX_ITERATIONS_ALLOWED}"
-		                            f"&min_iterations={MIN_ITERATIONS_ALLOWED}"
-		                            f"&id={saml_request.id}", 307)
+
+		aes_key = urandom(32)
+		aes_iv = urandom(16)
+		zkp_values[saml_request.id] = ZKP_IdP(key=aes_key, iv=aes_iv, saml_request=saml_request,
+		                                      max_iterations=MAX_ITERATIONS_ALLOWED)
+		raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/authenticate",
+		                                           params={
+			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
+			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
+			                                           'id': saml_request.id,
+			                                           'key': base64.urlsafe_b64encode(aes_key),
+			                                           'iv': base64.urlsafe_b64encode(aes_iv)
+		                                           }), 307)
 
 	@cherrypy.expose
-	@cherrypy.tools.json_out()
 	def authenticate(self, **kwargs):
 		id = kwargs['id']
-		challenge: bytes = kwargs['nonce'].encode()
 		current_zkp = zkp_values[id]
+		request_args = current_zkp.decipher_data(kwargs['ciphered'])
+
+		challenge = request_args['nonce'].encode()
 		if current_zkp.iteration < 2:
-			if 'username' in kwargs:
-				current_zkp.username = kwargs['username']
-				current_zkp.password = get_user(kwargs['username'])[0].encode()
+			if 'username' in request_args:
+				username = str(request_args['username'])
+				current_zkp.username = username
+				current_zkp.password = get_user(username)[0].encode()
 			else:
 				del current_zkp
 				raise cherrypy.HTTPError(400, message='The first request to this endpoint must have the parameter username')
-			if 'iterations' in kwargs:
-				iterations = int(kwargs['iterations'])
+			if 'iterations' in request_args:
+				iterations = int(request_args['iterations'])
 				if MIN_ITERATIONS_ALLOWED <= iterations <= MAX_ITERATIONS_ALLOWED:
 					current_zkp.max_iterations = iterations
 				else:
 					del current_zkp
 					raise cherrypy.HTTPError(406, message='The number of iterations does not met the defined range')
 		else:
-			current_zkp.verify_challenge_response(int(kwargs['response']))
+			current_zkp.verify_challenge_response(int(request_args['response']))
 
 		challenge_response = current_zkp.response(challenge)
 		nonce = current_zkp.create_challenge()
@@ -76,59 +87,61 @@ class IdP(object):
 
 		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
 			self.create_saml_response(current_zkp)
-		return {
+		return current_zkp.cipher_data({
 			'nonce': nonce,
 			'response': challenge_response
-		}
+		})
 
 	@cherrypy.expose
-	@cherrypy.tools.json_out()
 	def authenticate_asymmetric(self, **kwargs):
 		saml_id = kwargs['saml_id']
+		current_zkp = zkp_values[saml_id]
+		request_args = current_zkp.decipher_data(kwargs['ciphered'])
 		if saml_id not in public_key_values:
-			id = kwargs['id']
-			username = kwargs['username']
+			id = request_args['id'].decode()
+			username = request_args['username'].decode()
 
 			public_key_db = get_user_key(id=id, username=username)
 			if len(public_key_db) > 0:
 				if public_key_db[1] > datetime.now().timestamp():           # verify if the key is not expired
-					zkp_values[saml_id].username = username
+					current_zkp.username = username
 					nonce = create_nonce()
 					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
 					public_key_values[saml_id] = (public_key, nonce)
-					return {
+					return current_zkp.cipher_data({
 						'nonce': nonce.decode()
-					}
+					})
 				else:
 					raise cherrypy.HTTPError(410, message="Expired key")
 			else:
 				raise cherrypy.HTTPError(424, message="No public key for the given id and username")
 		else:
-			response = base64.urlsafe_b64decode(kwargs['response'])
+			response = base64.urlsafe_b64decode(request_args['response'])
 
 			public_key, nonce = public_key_values[saml_id]
 			try:
 				public_key.verify(signature=response, data=nonce,
 			                      padding=asymmetric_padding(), algorithm=asymmetric_hash())
-				self.create_saml_response(zkp_values[saml_id])
+				self.create_saml_response(current_zkp)
 			except InvalidSignature:
-				del zkp_values[saml_id]
+				del current_zkp
 				del public_key_values[saml_id]
 				raise cherrypy.HTTPError(401, message="Authentication failed")
 
 	@cherrypy.expose
-	@cherrypy.tools.json_out()
-	def save_asymmetric(self, id, key):
+	def save_asymmetric(self, **kwargs):
+		id = kwargs['id']
 		current_zkp = zkp_values[id]
+		key = current_zkp.decipher_data(kwargs['ciphered'])['key']
 		status = False
 		if current_zkp.saml_response:
 			status = save_user_key(id=id, username=current_zkp.username,
 			                       key=key,
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
-		return {
+		return current_zkp.cipher_data({
 			'status': status,
 			'ttl': KEYS_TIME_TO_LIVE
-		}
+		})
 
 	@cherrypy.expose
 	def identity(self, id):

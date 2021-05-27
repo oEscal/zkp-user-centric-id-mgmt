@@ -13,7 +13,8 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPriva
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from mako.template import Template
 
-from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash, overlap_intervals
+from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash, overlap_intervals, \
+    aes_key_derivation, Cipher_Authentication
 
 """
 DÚVIDAS
@@ -56,7 +57,8 @@ class Asymmetric_authentication(object):
                 iv = file.read(INITIALIZATION_VECTOR_SIZE)
                 ciphered_secret = file.read()
 
-            decrypter = aes_cipher(password=self.password, iv=iv, salt=salt).decryptor()
+            key = aes_key_derivation(self.password, salt)
+            decrypter = aes_cipher(key=key, iv=iv).decryptor()
             secret = decrypter.update(ciphered_secret) + decrypter.finalize()
 
             with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'rb') as file:
@@ -81,7 +83,8 @@ class Asymmetric_authentication(object):
         # save the secret protected by the user password
         iv = urandom(INITIALIZATION_VECTOR_SIZE)
         salt = urandom(AES_KEY_SALT_SIZE)
-        encryptor = aes_cipher(password=self.password, iv=iv, salt=salt).encryptor()
+        key = aes_key_derivation(self.password, salt)
+        encryptor = aes_cipher(key=key, iv=iv).encryptor()
         with open(f"{KEYS_DIRECTORY}/{self.username}_secret", "wb") as file:
             file.write(salt)                # first AES_KEY_SALT_SIZE bytes
             file.write(iv)                  # first INITIALIZATION_VECTOR_SIZE bytes
@@ -113,6 +116,7 @@ class Asymmetric_authentication(object):
 class HelperApp(object):
     def __init__(self):
         self.iterations = 0
+        self.cipher_auth: Cipher_Authentication = None
 
     @staticmethod
     def static_contents(path):
@@ -124,19 +128,25 @@ class HelperApp(object):
 
     def asymmetric_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
                         password: bytes, saml_id: str):
+        ciphered_params = self.cipher_auth.cipher_data({
+            'id': asymmetric_authentication.id,
+            'username': username
+        })
         response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
                                 params={
-                                    'id': asymmetric_authentication.id,
                                     'saml_id': saml_id,
-                                    'username': username
+                                    'ciphered': ciphered_params
                                 })
         if response.status_code == 200:
-            nonce = response.json()['nonce'].encode()
+            response_dict = self.cipher_auth.decipher_data(response.text)
+            nonce = response_dict['nonce'].encode()
             challenge_response = asymmetric_authentication.sign(nonce)
             response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
                                     params={
                                         'saml_id': saml_id,
-                                        'response': base64.urlsafe_b64encode(challenge_response)
+                                        'ciphered': self.cipher_auth.cipher_data({
+                                            'response': base64.urlsafe_b64encode(challenge_response)
+                                        })
                                     })
             if response.status_code != 200:
                 print(f"Error status: {response.status_code}")
@@ -150,23 +160,24 @@ class HelperApp(object):
         zkp = ZKP(password)
         data_send = {
             'nonce': '',
-            'id': saml_id
         }
         for i in range(self.iterations):
             data_send['nonce'] = zkp.create_challenge()
-            response = requests.get(
-                f"http://localhost:8082/authenticate",
-                params={**data_send,
-                        **({'iterations': self.iterations} if zkp.iteration < 2 else {})}
-            )
+            ciphered_params = self.cipher_auth.cipher_data({**data_send,
+                        **({'username': username, 'iterations': self.iterations} if zkp.iteration < 2 else {})})
+            response = requests.get(f"http://localhost:8082/authenticate", params={
+                'ciphered': ciphered_params,
+                'id': saml_id
+            })
 
             if response.status_code == 200:
                 # verify if response to challenge is correct
-                idp_response = response.json()['response']
+                response_dict = self.cipher_auth.decipher_data(response.text)
+                idp_response = int(response_dict['response'])
                 zkp.verify_challenge_response(idp_response)
 
                 # create both response to the IdP challenge and new challenge to the IdP
-                challenge: bytes = response.json()['nonce'].encode()
+                challenge = response_dict['nonce'].encode()
                 challenge_response = zkp.response(challenge)
                 data_send['response'] = challenge_response
             else:
@@ -177,11 +188,11 @@ class HelperApp(object):
         asymmetric_authentication.generate_keys()
         response = requests.post("http://localhost:8082/save_asymmetric", data={
             'id': saml_id,
-            'key': asymmetric_authentication.get_public_key_str()
+            'ciphered': self.cipher_auth.cipher_data({'key': asymmetric_authentication.get_public_key_str()})
         })
 
-        response = response.json()
-        if 'status' in response and response['status']:
+        response = self.cipher_auth.decipher_data(response.text)
+        if 'status' in response and bool(response['status']):
             asymmetric_authentication.save_key(id=saml_id, time_to_live=float(response['ttl']))
 
     @cherrypy.expose
@@ -197,6 +208,11 @@ class HelperApp(object):
                     message='The range of allowed iterations received from the IdP is incompatible with the range '
                             'allowed by the local app. A possible cause for this is the IdP we are contacting is not'
                             'a trusted one!')
+            
+            key = base64.urlsafe_b64decode(kwargs['key'])
+            iv = base64.urlsafe_b64decode(kwargs['iv'])
+            self.cipher_auth = Cipher_Authentication(key=key, iv=iv)
+            
             return Template(filename='static/authenticate.html').render(id=kwargs['id'])
         elif cherrypy.request.method == 'POST':
             username = kwargs['username']
