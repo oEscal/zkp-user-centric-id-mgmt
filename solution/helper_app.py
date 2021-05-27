@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from mako.template import Template
 
 from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash, overlap_intervals, \
-    aes_key_derivation, Cipher_Authentication
+    aes_key_derivation, Cipher_Authentication, asymmetric_upload_derivation_variable_based
 
 """
 DÚVIDAS
@@ -184,14 +184,20 @@ class HelperApp(object):
                 return Template(filename='static/error.html').render(
                     message=f"Received the status code <{response.status_code}: {response.reason}> from the IdP")
 
+        key = asymmetric_upload_derivation_variable_based(zkp.responses, zkp.iteration, 32)
+        iv = asymmetric_upload_derivation_variable_based(zkp.responses, len(zkp.password), 16)
+        asymmetric_cipher_auth = Cipher_Authentication(key=key, iv=iv)
+
         # generate asymmetric keys
         asymmetric_authentication.generate_keys()
         response = requests.post("http://localhost:8082/save_asymmetric", data={
             'id': saml_id,
-            'ciphered': self.cipher_auth.cipher_data({'key': asymmetric_authentication.get_public_key_str()})
+            'ciphered': self.cipher_auth.cipher_data(asymmetric_cipher_auth.cipher_data({
+                'key': asymmetric_authentication.get_public_key_str()
+            }))
         })
 
-        response = self.cipher_auth.decipher_data(response.text)
+        response = asymmetric_cipher_auth.decipher_data(self.cipher_auth.decipher_data(response.text))
         if 'status' in response and bool(response['status']):
             asymmetric_authentication.save_key(id=saml_id, time_to_live=float(response['ttl']))
 

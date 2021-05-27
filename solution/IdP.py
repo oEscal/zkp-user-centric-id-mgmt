@@ -15,7 +15,8 @@ from saml2.config import Config
 from saml2.server import Server
 
 from queries import setup_database, get_user, save_user_key, get_user_key
-from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash, create_get_url
+from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash, create_get_url, Cipher_Authentication, \
+	asymmetric_upload_derivation_variable_based
 
 # TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
@@ -132,16 +133,21 @@ class IdP(object):
 	def save_asymmetric(self, **kwargs):
 		id = kwargs['id']
 		current_zkp = zkp_values[id]
-		key = current_zkp.decipher_data(kwargs['ciphered'])['key']
+
+		key = asymmetric_upload_derivation_variable_based(current_zkp.responses, current_zkp.iteration, 32)
+		iv = asymmetric_upload_derivation_variable_based(current_zkp.responses, len(current_zkp.password), 16)
+		asymmetric_cipher_auth = Cipher_Authentication(key=key, iv=iv)
+
+		key = asymmetric_cipher_auth.decipher_data(current_zkp.decipher_data(kwargs['ciphered']))['key']
 		status = False
 		if current_zkp.saml_response:
 			status = save_user_key(id=id, username=current_zkp.username,
 			                       key=key,
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
-		return current_zkp.cipher_data({
+		return current_zkp.cipher_data(asymmetric_cipher_auth.cipher_data({
 			'status': status,
 			'ttl': KEYS_TIME_TO_LIVE
-		})
+		}))
 
 	@cherrypy.expose
 	def identity(self, id):

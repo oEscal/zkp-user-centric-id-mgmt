@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import typing
 from os import urandom
 import uuid
 from requests.models import PreparedRequest
@@ -20,6 +19,7 @@ class ZKP(object):
 		self.iteration = 0
 		self.password = password
 		self.all_ok = True
+		self.responses = b''
 
 	def response(self, challenge: bytes) -> int:
 		if self.all_ok:
@@ -27,6 +27,7 @@ class ZKP(object):
 			self.iteration += 1
 
 			challenge_response = hash_function(self.challenges, self.password)
+			self.responses += challenge_response
 			challenge_response = bin(int(challenge_response.hex(), base=16)).lstrip('0b')
 			return int(challenge_response[self.iteration % len(challenge_response)])
 		else:
@@ -51,17 +52,21 @@ class Cipher_Authentication(object):
 		self.block_size = algorithms.AES(self.key).block_size
 		self.cipher = aes_cipher(key=self.key, iv=self.iv)
 
-	def decipher_data(self, data: str) -> dict:
+	def decipher_data(self, data: str):
 		unpadder = padding.PKCS7(self.block_size).unpadder()
 		decrypter = self.cipher.decryptor()
 		decrypted_data = decrypter.update(base64.urlsafe_b64decode(data)) + decrypter.finalize()
 		return json.loads(unpadder.update(decrypted_data) + unpadder.finalize())
 
-	def cipher_data(self, data: dict) -> str:
+	def cipher_data(self, data):
 		padder = padding.PKCS7(self.block_size).padder()
 		padded_data = padder.update(json.dumps(data).encode()) + padder.finalize()
 		encryptor = self.cipher.encryptor()
 		return base64.urlsafe_b64encode(encryptor.update(padded_data) + encryptor.finalize()).decode()
+
+	def set_new_iv(self, iv: bytes):
+		self.iv = iv
+		self.cipher = aes_cipher(key=self.key, iv=self.iv)
 
 
 class ZKP_IdP(ZKP, Cipher_Authentication):
@@ -123,3 +128,11 @@ def aes_key_derivation(password: bytes, salt: bytes) -> bytes:
 def aes_cipher(key: bytes, iv: bytes) -> Cipher:
 	cipher = Cipher(algorithm=algorithms.AES(key=key), mode=modes.CBC(iv))
 	return cipher
+
+
+def asymmetric_upload_derivation_variable_based(responses: bytes, variable: int, size: int) -> bytes:
+	result = b''
+	for i in range(size):
+		result += bytes([responses[(variable*i) % len(responses)]])
+
+	return result
