@@ -103,10 +103,18 @@ def asymmetric_hash():
 	return hashes.SHA256()
 
 
-def asymmetric_padding():
+def asymmetric_padding_signature():
 	return padding_asymmetric.PSS(
 		mgf=padding_asymmetric.MGF1(asymmetric_hash()),
 		salt_length=padding_asymmetric.PSS.MAX_LENGTH
+	)
+
+
+def asymmetric_padding_encryption():
+	return padding_asymmetric.OAEP(
+		mgf=padding_asymmetric.MGF1(asymmetric_hash()),
+		algorithm=asymmetric_hash(),
+		label=None
 	)
 
 

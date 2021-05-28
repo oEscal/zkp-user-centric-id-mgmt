@@ -15,15 +15,16 @@ from saml2.config import Config
 from saml2.server import Server
 
 from queries import setup_database, get_user, save_user_key, get_user_key
-from utils import ZKP_IdP, create_nonce, asymmetric_padding, asymmetric_hash, create_get_url, Cipher_Authentication, \
-	asymmetric_upload_derivation_variable_based
+from utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
+	Cipher_Authentication, \
+	asymmetric_upload_derivation_variable_based, asymmetric_padding_encryption
 
 # TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
 MAX_ITERATIONS_ALLOWED = 30
 MIN_ITERATIONS_ALLOWED = 10
-KEYS_TIME_TO_LIVE = 2       # minutes
+KEYS_TIME_TO_LIVE = 10       # minutes
 
 
 class IdP(object):
@@ -99,18 +100,24 @@ class IdP(object):
 		current_zkp = zkp_values[saml_id]
 		request_args = current_zkp.decipher_data(kwargs['ciphered'])
 		if saml_id not in public_key_values:
-			id = request_args['id'].decode()
-			username = request_args['username'].decode()
+			id = request_args['id']
+			username = request_args['username']
+			nonce_received = request_args['nonce'].encode()
 
 			public_key_db = get_user_key(id=id, username=username)
 			if len(public_key_db) > 0:
 				if public_key_db[1] > datetime.now().timestamp():           # verify if the key is not expired
+					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
+
+					# create response to the challenge
+					challenge_response = public_key.encrypt(nonce_received, padding=asymmetric_padding_encryption())
+
 					current_zkp.username = username
 					nonce = create_nonce()
-					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
 					public_key_values[saml_id] = (public_key, nonce)
 					return current_zkp.cipher_data({
-						'nonce': nonce.decode()
+						'nonce': nonce.decode(),
+						'response': base64.urlsafe_b64encode(challenge_response).decode()
 					})
 				else:
 					raise cherrypy.HTTPError(410, message="Expired key")
@@ -122,7 +129,7 @@ class IdP(object):
 			public_key, nonce = public_key_values[saml_id]
 			try:
 				public_key.verify(signature=response, data=nonce,
-			                      padding=asymmetric_padding(), algorithm=asymmetric_hash())
+				                  padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
 				self.create_saml_response(current_zkp)
 			except InvalidSignature:
 				del current_zkp

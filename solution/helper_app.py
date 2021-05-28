@@ -13,8 +13,9 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPriva
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from mako.template import Template
 
-from utils import ZKP, create_directory, aes_cipher, asymmetric_padding, asymmetric_hash, overlap_intervals, \
-    aes_key_derivation, Cipher_Authentication, asymmetric_upload_derivation_variable_based
+from utils import ZKP, create_directory, aes_cipher, asymmetric_padding_signature, asymmetric_hash, overlap_intervals, \
+    aes_key_derivation, Cipher_Authentication, asymmetric_upload_derivation_variable_based, create_nonce, \
+    asymmetric_padding_encryption
 
 """
 DÚVIDAS
@@ -66,7 +67,7 @@ class Asymmetric_authentication(object):
                 time_to_live = float(file.readline())
                 pem = file.read()
 
-            if True:        # time_to_live < datetime.now().timestamp():
+            if time_to_live > datetime.now().timestamp():
                 self.private_key = load_pem_private_key(
                     data=pem,
                     password=secret,
@@ -97,7 +98,10 @@ class Asymmetric_authentication(object):
             file.write(self.get_private_key_bytes(secret))
 
     def sign(self, data: bytes) -> bytes:
-        return self.private_key.sign(data=data, padding=asymmetric_padding(), algorithm=asymmetric_hash())
+        return self.private_key.sign(data=data, padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
+
+    def decrypt(self, data: bytes) -> bytes:
+        return self.private_key.decrypt(data, padding=asymmetric_padding_encryption())
 
     def get_private_key_bytes(self, secret: bytes) -> bytes:
         return self.private_key.private_bytes(
@@ -128,8 +132,10 @@ class HelperApp(object):
 
     def asymmetric_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
                         password: bytes, saml_id: str):
+        nonce_to_send = create_nonce()
         ciphered_params = self.cipher_auth.cipher_data({
             'id': asymmetric_authentication.id,
+            'nonce': nonce_to_send.decode(),
             'username': username
         })
         response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
@@ -137,23 +143,32 @@ class HelperApp(object):
                                     'saml_id': saml_id,
                                     'ciphered': ciphered_params
                                 })
-        if response.status_code == 200:
-            response_dict = self.cipher_auth.decipher_data(response.text)
-            nonce = response_dict['nonce'].encode()
-            challenge_response = asymmetric_authentication.sign(nonce)
-            response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
-                                    params={
-                                        'saml_id': saml_id,
-                                        'ciphered': self.cipher_auth.cipher_data({
-                                            'response': base64.urlsafe_b64encode(challenge_response)
-                                        })
-                                    })
-            if response.status_code != 200:
-                print(f"Error status: {response.status_code}")
-                self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
-        else:
+        if response.status_code != 200:
             print(f"Error status: {response.status_code}")
             self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
+        else:
+            response_dict = self.cipher_auth.decipher_data(response.text)
+
+            # verify the authenticity of the IdP
+            if ('response' not in response_dict
+                    or nonce_to_send != asymmetric_authentication.decrypt(base64.urlsafe_b64decode(response_dict['response']))):
+                return Template(filename='static/error.html').render(
+                    message='The response to the challenge sent to the IdP to authentication '
+                            'with asymmetric keys is not valid. A possible cause for this is '
+                            'the IdP we are contacting is not a trusted one!')
+            else:
+                nonce = response_dict['nonce'].encode()
+                challenge_response = asymmetric_authentication.sign(nonce)
+                response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                                        params={
+                                            'saml_id': saml_id,
+                                            'ciphered': self.cipher_auth.cipher_data({
+                                                'response': base64.urlsafe_b64encode(challenge_response).decode()
+                                            })
+                                        })
+                if response.status_code != 200:
+                    print(f"Error status: {response.status_code}")
+                    self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
 
     def zkp_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
                  password: bytes, saml_id: str):
@@ -212,7 +227,7 @@ class HelperApp(object):
             else:
                 return Template(filename='static/error.html').render(
                     message='The range of allowed iterations received from the IdP is incompatible with the range '
-                            'allowed by the local app. A possible cause for this is the IdP we are contacting is not'
+                            'allowed by the local app. A possible cause for this is the IdP we are contacting is not '
                             'a trusted one!')
             
             key = base64.urlsafe_b64decode(kwargs['key'])
