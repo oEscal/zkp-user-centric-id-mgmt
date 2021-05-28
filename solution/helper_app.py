@@ -133,7 +133,7 @@ class HelperApp(object):
     def asymmetric_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
                         password: bytes, saml_id: str):
         nonce_to_send = create_nonce()
-        ciphered_params = self.cipher_auth.cipher_data({
+        ciphered_params = self.cipher_auth.create_response({
             'id': asymmetric_authentication.id,
             'nonce': nonce_to_send.decode(),
             'username': username
@@ -141,13 +141,13 @@ class HelperApp(object):
         response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
                                 params={
                                     'saml_id': saml_id,
-                                    'ciphered': ciphered_params
+                                    **ciphered_params
                                 })
         if response.status_code != 200:
             print(f"Error status: {response.status_code}")
             self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
         else:
-            response_dict = self.cipher_auth.decipher_data(response.text)
+            response_dict = self.cipher_auth.decipher_response(response.json())
 
             # verify the authenticity of the IdP
             if ('response' not in response_dict
@@ -162,7 +162,7 @@ class HelperApp(object):
                 response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
                                         params={
                                             'saml_id': saml_id,
-                                            'ciphered': self.cipher_auth.cipher_data({
+                                            **self.cipher_auth.create_response({
                                                 'response': base64.urlsafe_b64encode(challenge_response).decode()
                                             })
                                         })
@@ -178,16 +178,16 @@ class HelperApp(object):
         }
         for i in range(self.iterations):
             data_send['nonce'] = zkp.create_challenge()
-            ciphered_params = self.cipher_auth.cipher_data({**data_send,
+            ciphered_params = self.cipher_auth.create_response({**data_send,
                         **({'username': username, 'iterations': self.iterations} if zkp.iteration < 2 else {})})
             response = requests.get(f"http://localhost:8082/authenticate", params={
-                'ciphered': ciphered_params,
-                'id': saml_id
+                'id': saml_id,
+                **ciphered_params
             })
 
             if response.status_code == 200:
                 # verify if response to challenge is correct
-                response_dict = self.cipher_auth.decipher_data(response.text)
+                response_dict = self.cipher_auth.decipher_response(response.json())
                 idp_response = int(response_dict['response'])
                 zkp.verify_challenge_response(idp_response)
 
@@ -201,18 +201,18 @@ class HelperApp(object):
 
         key = asymmetric_upload_derivation_variable_based(zkp.responses, zkp.iteration, 32)
         iv = asymmetric_upload_derivation_variable_based(zkp.responses, len(zkp.password), 16)
-        asymmetric_cipher_auth = Cipher_Authentication(key=key, iv=iv)
+        asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
         # generate asymmetric keys
         asymmetric_authentication.generate_keys()
         response = requests.post("http://localhost:8082/save_asymmetric", data={
             'id': saml_id,
-            'ciphered': self.cipher_auth.cipher_data(asymmetric_cipher_auth.cipher_data({
+            **self.cipher_auth.create_response(asymmetric_cipher_auth.create_response({
                 'key': asymmetric_authentication.get_public_key_str()
             }))
         })
 
-        response = asymmetric_cipher_auth.decipher_data(self.cipher_auth.decipher_data(response.text))
+        response = asymmetric_cipher_auth.decipher_response(self.cipher_auth.decipher_response(response.json()))
         if 'status' in response and bool(response['status']):
             asymmetric_authentication.save_key(id=saml_id, time_to_live=float(response['ttl']))
 
@@ -231,8 +231,7 @@ class HelperApp(object):
                             'a trusted one!')
             
             key = base64.urlsafe_b64decode(kwargs['key'])
-            iv = base64.urlsafe_b64decode(kwargs['iv'])
-            self.cipher_auth = Cipher_Authentication(key=key, iv=iv)
+            self.cipher_auth = Cipher_Authentication(key=key)
             
             return Template(filename='static/authenticate.html').render(id=kwargs['id'])
         elif cherrypy.request.method == 'POST':

@@ -45,34 +45,44 @@ class ZKP(object):
 
 
 class Cipher_Authentication(object):
-	def __init__(self, key: bytes, iv: bytes):
+	def __init__(self, key: bytes):
 		self.key = key
-		self.iv = iv
 
 		self.block_size = algorithms.AES(self.key).block_size
-		self.cipher = aes_cipher(key=self.key, iv=self.iv)
 
-	def decipher_data(self, data: str):
+	def decipher_data(self, data: str, iv: bytes):
+		cipher = aes_cipher(key=self.key, iv=iv)
+
 		unpadder = padding.PKCS7(self.block_size).unpadder()
-		decrypter = self.cipher.decryptor()
+		decrypter = cipher.decryptor()
 		decrypted_data = decrypter.update(base64.urlsafe_b64decode(data)) + decrypter.finalize()
 		return json.loads(unpadder.update(decrypted_data) + unpadder.finalize())
 
-	def cipher_data(self, data):
+	def cipher_data(self, data, iv: bytes):
+		cipher = aes_cipher(key=self.key, iv=iv)
+
 		padder = padding.PKCS7(self.block_size).padder()
 		padded_data = padder.update(json.dumps(data).encode()) + padder.finalize()
-		encryptor = self.cipher.encryptor()
+		encryptor = cipher.encryptor()
 		return base64.urlsafe_b64encode(encryptor.update(padded_data) + encryptor.finalize()).decode()
 
-	def set_new_iv(self, iv: bytes):
-		self.iv = iv
-		self.cipher = aes_cipher(key=self.key, iv=self.iv)
+	def create_response(self, data) -> dict:
+		iv = urandom(16)
+		return {
+			'ciphered': self.cipher_data(data, iv),
+			'iv': base64.urlsafe_b64encode(iv).decode()
+		}
+
+	def decipher_response(self, response):
+		data = response['ciphered']
+		iv = base64.urlsafe_b64decode(response['iv'])
+		return self.decipher_data(data, iv)
 
 
 class ZKP_IdP(ZKP, Cipher_Authentication):
-	def __init__(self, key: bytes, iv: bytes, saml_request: AuthnRequest, max_iterations: int):
+	def __init__(self, key: bytes, saml_request: AuthnRequest, max_iterations: int):
 		ZKP.__init__(self, password=b'')
-		Cipher_Authentication.__init__(self, key=key, iv=iv)
+		Cipher_Authentication.__init__(self, key=key)
 		self.username = b''
 		self.saml_request: AuthnRequest = saml_request
 		self.saml_response = None

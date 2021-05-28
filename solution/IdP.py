@@ -43,23 +43,22 @@ class IdP(object):
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
 
 		aes_key = urandom(32)
-		aes_iv = urandom(16)
-		zkp_values[saml_request.id] = ZKP_IdP(key=aes_key, iv=aes_iv, saml_request=saml_request,
+		zkp_values[saml_request.id] = ZKP_IdP(key=aes_key, saml_request=saml_request,
 		                                      max_iterations=MAX_ITERATIONS_ALLOWED)
 		raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/authenticate",
 		                                           params={
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
 			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
 			                                           'id': saml_request.id,
-			                                           'key': base64.urlsafe_b64encode(aes_key),
-			                                           'iv': base64.urlsafe_b64encode(aes_iv)
+			                                           'key': base64.urlsafe_b64encode(aes_key)
 		                                           }), 307)
 
 	@cherrypy.expose
+	@cherrypy.tools.json_out()
 	def authenticate(self, **kwargs):
 		id = kwargs['id']
 		current_zkp = zkp_values[id]
-		request_args = current_zkp.decipher_data(kwargs['ciphered'])
+		request_args = current_zkp.decipher_response(kwargs)
 
 		challenge = request_args['nonce'].encode()
 		if current_zkp.iteration < 2:
@@ -89,16 +88,17 @@ class IdP(object):
 
 		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
 			self.create_saml_response(current_zkp)
-		return current_zkp.cipher_data({
+		return current_zkp.create_response({
 			'nonce': nonce,
 			'response': challenge_response
 		})
 
 	@cherrypy.expose
+	@cherrypy.tools.json_out()
 	def authenticate_asymmetric(self, **kwargs):
 		saml_id = kwargs['saml_id']
 		current_zkp = zkp_values[saml_id]
-		request_args = current_zkp.decipher_data(kwargs['ciphered'])
+		request_args = current_zkp.decipher_response(kwargs)
 		if saml_id not in public_key_values:
 			id = request_args['id']
 			username = request_args['username']
@@ -115,7 +115,7 @@ class IdP(object):
 					current_zkp.username = username
 					nonce = create_nonce()
 					public_key_values[saml_id] = (public_key, nonce)
-					return current_zkp.cipher_data({
+					return current_zkp.create_response({
 						'nonce': nonce.decode(),
 						'response': base64.urlsafe_b64encode(challenge_response).decode()
 					})
@@ -137,21 +137,21 @@ class IdP(object):
 				raise cherrypy.HTTPError(401, message="Authentication failed")
 
 	@cherrypy.expose
+	@cherrypy.tools.json_out()
 	def save_asymmetric(self, **kwargs):
 		id = kwargs['id']
 		current_zkp = zkp_values[id]
 
 		key = asymmetric_upload_derivation_variable_based(current_zkp.responses, current_zkp.iteration, 32)
-		iv = asymmetric_upload_derivation_variable_based(current_zkp.responses, len(current_zkp.password), 16)
-		asymmetric_cipher_auth = Cipher_Authentication(key=key, iv=iv)
+		asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
-		key = asymmetric_cipher_auth.decipher_data(current_zkp.decipher_data(kwargs['ciphered']))['key']
+		key = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))['key']
 		status = False
 		if current_zkp.saml_response:
 			status = save_user_key(id=id, username=current_zkp.username,
 			                       key=key,
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
-		return current_zkp.cipher_data(asymmetric_cipher_auth.cipher_data({
+		return current_zkp.create_response(asymmetric_cipher_auth.create_response({
 			'status': status,
 			'ttl': KEYS_TIME_TO_LIVE
 		}))
