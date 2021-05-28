@@ -19,7 +19,6 @@ from utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetri
 	Cipher_Authentication, \
 	asymmetric_upload_derivation_variable_based, asymmetric_padding_encryption
 
-# TODO -> PERGUNTAR SE O IdP É QUE DETERMINA O NÚMERO DE ITERAÇÕES OU SE TÊM DE SER OS DOIS
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
 MAX_ITERATIONS_ALLOWED = 30
@@ -157,7 +156,8 @@ class IdP(object):
 		}))
 
 	@cherrypy.expose
-	def identity(self, id):
+	def identity(self, **kwargs):
+		id = kwargs['id']
 		http_args = \
 			http_form_post_message(message=f"{zkp_values[id].saml_response}",
 			                      location=f"{zkp_values[id].saml_request.assertion_consumer_service_url}",

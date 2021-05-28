@@ -15,7 +15,7 @@ from mako.template import Template
 
 from utils import ZKP, create_directory, aes_cipher, asymmetric_padding_signature, asymmetric_hash, overlap_intervals, \
     aes_key_derivation, Cipher_Authentication, asymmetric_upload_derivation_variable_based, create_nonce, \
-    asymmetric_padding_encryption
+    asymmetric_padding_encryption, create_get_url
 
 """
 DÚVIDAS
@@ -247,7 +247,10 @@ class HelperApp(object):
                                          username=username, password=password, saml_id=kwargs['id'])
                 if template:
                     return template
-            raise cherrypy.HTTPRedirect(f"http://localhost:8082/identity?id={kwargs['id']}")
+            raise cherrypy.HTTPRedirect(create_get_url("http://127.0.0.1:8082/identity",
+                                                       params={
+                                                               'id': kwargs['id'],
+                                                       }))
 
 
 if __name__ == '__main__':
