@@ -27,8 +27,10 @@ KEYS_TIME_TO_LIVE = 10       # minutes
 
 
 class IdP(object):
-	def __init__(self):
+	def __init__(self, hostname, port):
 		self.server = Server("idp")
+		self.hostname = hostname
+		self.port = port
 
 	def create_saml_response(self, zkp: ZKP_IdP):
 		entity = self.server.response_args(zkp.saml_request)
@@ -49,7 +51,9 @@ class IdP(object):
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
 			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
 			                                           'id': saml_request.id,
-			                                           'key': base64.urlsafe_b64encode(aes_key)
+			                                           'key': base64.urlsafe_b64encode(aes_key),
+			                                           'idp': base64.urlsafe_b64encode(
+				                                           f"http://{self.hostname}:{self.port}".encode())
 		                                           }), 307)
 
 	@cherrypy.expose
@@ -169,6 +173,9 @@ class IdP(object):
 
 if __name__ == '__main__':
 	setup_database()
-	cherrypy.config.update({'server.socket_host': '127.0.0.1',
-	                        'server.socket_port': 8082})
-	cherrypy.quickstart(IdP())
+
+	hostname = '127.0.0.1'
+	port = 8082
+	cherrypy.config.update({'server.socket_host': hostname,
+	                        'server.socket_port': port})
+	cherrypy.quickstart(IdP(hostname=hostname, port=port))

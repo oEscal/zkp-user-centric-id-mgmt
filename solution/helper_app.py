@@ -1,4 +1,5 @@
 import base64
+import json
 from datetime import datetime, timedelta
 from os import urandom
 import random
@@ -6,10 +7,12 @@ import random
 import requests
 
 import cherrypy
+from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPrivateKey
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from mako.template import Template
 
@@ -26,82 +29,167 @@ DÚVIDAS
  - O id da public key entre o helper e o idp pode ser por exemplo o id do saml request, já que este é unico?
 """
 
-KEYS_DIRECTORY = 'helper_keys/'
+KEYS_DIRECTORY = 'helper_keys'
 INITIALIZATION_VECTOR_SIZE = 16
 AES_KEY_SALT_SIZE = 16
+USER_ID_SIZE = 16
 
 MIN_ITERATIONS_ALLOWED = 10
 MAX_ITERATIONS_ALLOWED = 15
 
 
-class Asymmetric_authentication(object):
-    def __init__(self, username: str, password: bytes):
+class Master_Password_Manager(object):
+    def __init__(self, username: str, master_password: bytes):
+        self.username = username
+        self.master_password = master_password
+
+        self.create_file_if_not_exist()
+
+    def register_user(self) -> bool:
+        with open(f"{KEYS_DIRECTORY}/users.json", "r+") as file:
+            users = {}
+            try:
+                users = json.load(file)
+            except Exception:
+                pass
+
+            if self.username in users:
+                return False
+
+            salt = urandom(AES_KEY_SALT_SIZE)
+            users[self.username] = {}
+            users[self.username]['salt'] = base64.b64encode(salt).decode()
+            users[self.username]['password'] = base64.b64encode(
+                self.derivation_function(salt).derive(self.master_password)
+            ).decode()
+            file.seek(0, 0)
+            json.dump(users, file)
+
+        return True
+
+    def login(self) -> bool:
+        with open(f"{KEYS_DIRECTORY}/users.json", "r") as file:
+            users = json.load(file)
+
+        if self.username not in users:
+            return False
+
+        salt = base64.b64decode(users[self.username]['salt'])
+        key = base64.b64decode(users[self.username]['password'])
+        try:
+            self.derivation_function(salt).verify(self.master_password, key)
+        except InvalidKey:
+            return False
+
+        return True
+
+    @staticmethod
+    def derivation_function(salt) -> Scrypt:
+        return Scrypt(
+            salt=salt,
+            length=32,
+            n=2 ** 14,
+            r=8,
+            p=1
+        )
+
+    @staticmethod
+    def create_file_if_not_exist():
+        # create file if not exist
+        with open(f"{KEYS_DIRECTORY}/users.json", "a+"):
+            pass
+
+
+# noinspection PyBroadException,PyTypeChecker
+class Password_Manager(object):
+    def __init__(self, username: str, master_password: bytes, idp: str):
         self.private_key: RSAPrivateKey = None
         self.public_key: RSAPublicKey = None
 
         self.username = username
-        self.password = password
+        self.master_password = master_password
+        self.idp = idp
 
-        self.id = self.load_keys()
+        self.password: bytes = b''
+        self.user_id: bytes = b''
+
+        self.salt_private_key: bytes = b''
 
     def generate_keys(self):
+        self.user_id = urandom(USER_ID_SIZE)
+
         self.private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048
         )
         self.public_key = self.private_key.public_key()
 
-    def load_keys(self) -> str:
+    def load_password(self) -> bool:
         try:
-            with open(f"{KEYS_DIRECTORY}/{self.username}_secret", "rb") as file:
-                salt = file.read(AES_KEY_SALT_SIZE)
+            with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{base64.b64encode(self.idp.encode())}", "rb") as file:
+                salt_password = file.read(AES_KEY_SALT_SIZE)
+                self.salt_private_key = file.read(AES_KEY_SALT_SIZE)
                 iv = file.read(INITIALIZATION_VECTOR_SIZE)
-                ciphered_secret = file.read()
+                ciphered_password = file.read()
 
-            key = aes_key_derivation(self.password, salt)
+            key = aes_key_derivation(self.master_password, salt_password)
             decrypter = aes_cipher(key=key, iv=iv).decryptor()
-            secret = decrypter.update(ciphered_secret) + decrypter.finalize()
+            self.password = decrypter.update(ciphered_password) + decrypter.finalize()
 
-            with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'rb') as file:
-                id = file.readline().decode().rstrip()
+            return True
+        except Exception:
+            return False
+
+    def load_private_key(self) -> bool:
+        try:
+            with open(f"{KEYS_DIRECTORY}/{self.username}_{base64.b64encode(self.idp.encode())}.pem", 'rb') as file:
+                self.user_id = file.read(USER_ID_SIZE)
                 time_to_live = float(file.readline())
                 pem = file.read()
 
             if time_to_live > datetime.now().timestamp():
                 self.private_key = load_pem_private_key(
                     data=pem,
-                    password=secret,
+                    password=self.private_key_secret(),
                     backend=default_backend()
                 )
-            return id
-        except Exception as e:
-            print(f"Error: {e}")
+            else:
+                return False
 
-    def save_key(self, id: str, time_to_live: float):
-        secret = urandom(32)
+            return True
+        except Exception:
+            return False
+
+    def save_password(self, password: bytes):
+        self.password = password
+
         create_directory(KEYS_DIRECTORY)
 
-        # save the secret protected by the user password
         iv = urandom(INITIALIZATION_VECTOR_SIZE)
-        salt = urandom(AES_KEY_SALT_SIZE)
-        key = aes_key_derivation(self.password, salt)
+        salt_password = urandom(AES_KEY_SALT_SIZE)
+        self.salt_private_key = urandom(AES_KEY_SALT_SIZE)
+        key = aes_key_derivation(self.master_password, salt_password)
         encryptor = aes_cipher(key=key, iv=iv).encryptor()
-        with open(f"{KEYS_DIRECTORY}/{self.username}_secret", "wb") as file:
-            file.write(salt)                # first AES_KEY_SALT_SIZE bytes
-            file.write(iv)                  # first INITIALIZATION_VECTOR_SIZE bytes
-            file.write(encryptor.update(secret) + encryptor.finalize())
+        with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{base64.b64encode(self.idp.encode())}", "wb") as file:
+            file.write(salt_password)                       # first AES_KEY_SALT_SIZE bytes
+            file.write(self.salt_private_key)               # first AES_KEY_SALT_SIZE bytes
+            file.write(iv)                                  # first INITIALIZATION_VECTOR_SIZE bytes
+            file.write(encryptor.update(self.password) + encryptor.finalize())
 
-        # save the private key protected with the secret
-        with open(f"{KEYS_DIRECTORY}/{self.username}.pem", 'wb') as file:
-            file.write(f"{id}\n".encode())
+    def save_private_key(self, time_to_live: float):
+        with open(f"{KEYS_DIRECTORY}/{self.username}_{base64.b64encode(self.idp.encode())}.pem", 'wb') as file:
+            file.write(self.user_id)
             file.write(f"{(datetime.now() + timedelta(minutes=time_to_live)).timestamp()}\n".encode())
-            file.write(self.get_private_key_bytes(secret))
+            file.write(self.get_private_key_bytes(secret=self.private_key_secret()))
 
     def sign(self, data: bytes) -> bytes:
         return self.private_key.sign(data=data, padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
 
     def decrypt(self, data: bytes) -> bytes:
         return self.private_key.decrypt(data, padding=asymmetric_padding_encryption())
+
+    def private_key_secret(self) -> bytes:
+        return aes_key_derivation(self.master_password + self.password, salt=self.salt_private_key)
 
     def get_private_key_bytes(self, secret: bytes) -> bytes:
         return self.private_key.private_bytes(
@@ -120,7 +208,10 @@ class Asymmetric_authentication(object):
 class HelperApp(object):
     def __init__(self):
         self.iterations = 0
+        self.idp = None
+        self.saml_id: str = ''
         self.cipher_auth: Cipher_Authentication = None
+        self.password_manager: Password_Manager = None
 
     @staticmethod
     def static_contents(path):
@@ -128,60 +219,63 @@ class HelperApp(object):
 
     @cherrypy.expose
     def index(self):
-        raise cherrypy.HTTPRedirect('/authenticate')
+        raise cherrypy.HTTPRedirect('/register')
 
-    def asymmetric_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
-                        password: bytes, saml_id: str):
+    def asymmetric_auth(self):
         nonce_to_send = create_nonce()
         ciphered_params = self.cipher_auth.create_response({
-            'id': asymmetric_authentication.id,
+            'id': self.password_manager.user_id,
             'nonce': nonce_to_send.decode(),
-            'username': username
+            'username': self.password_manager.username
         })
-        response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+        response = requests.get(f"{self.idp}/authenticate_asymmetric",
                                 params={
-                                    'saml_id': saml_id,
+                                    'saml_id': self.saml_id,
                                     **ciphered_params
                                 })
         if response.status_code != 200:
             print(f"Error status: {response.status_code}")
-            self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
+            self.zkp_auth()
         else:
             response_dict = self.cipher_auth.decipher_response(response.json())
 
             # verify the authenticity of the IdP
             if ('response' not in response_dict
-                    or nonce_to_send != asymmetric_authentication.decrypt(base64.urlsafe_b64decode(response_dict['response']))):
+                    or nonce_to_send != self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['response']))):
                 return Template(filename='static/error.html').render(
                     message='The response to the challenge sent to the IdP to authentication '
                             'with asymmetric keys is not valid. A possible cause for this is '
                             'the IdP we are contacting is not a trusted one!')
             else:
                 nonce = response_dict['nonce'].encode()
-                challenge_response = asymmetric_authentication.sign(nonce)
-                response = requests.get(f"http://localhost:8082/authenticate_asymmetric",
+                challenge_response = self.password_manager.sign(nonce)
+                response = requests.get(f"{self.idp}/authenticate_asymmetric",
                                         params={
-                                            'saml_id': saml_id,
+                                            'saml_id': self.saml_id,
                                             **self.cipher_auth.create_response({
                                                 'response': base64.urlsafe_b64encode(challenge_response).decode()
                                             })
                                         })
                 if response.status_code != 200:
                     print(f"Error status: {response.status_code}")
-                    self.zkp_auth(asymmetric_authentication, username=username, password=password, saml_id=saml_id)
+                    self.zkp_auth()
 
-    def zkp_auth(self, asymmetric_authentication: Asymmetric_authentication, username: str,
-                 password: bytes, saml_id: str):
-        zkp = ZKP(password)
+    def zkp_auth(self):
+        zkp = ZKP(self.password_manager.password)
         data_send = {
             'nonce': '',
         }
         for i in range(self.iterations):
             data_send['nonce'] = zkp.create_challenge()
-            ciphered_params = self.cipher_auth.create_response({**data_send,
-                        **({'username': username, 'iterations': self.iterations} if zkp.iteration < 2 else {})})
-            response = requests.get(f"http://localhost:8082/authenticate", params={
-                'id': saml_id,
+            ciphered_params = self.cipher_auth.create_response({
+                **data_send,
+                **({
+                       'username': self.password_manager.username,
+                       'iterations': self.iterations
+                   } if zkp.iteration < 2 else {})
+            })
+            response = requests.get(f"{self.idp}/authenticate", params={
+                'id': self.saml_id,
                 **ciphered_params
             })
 
@@ -200,57 +294,89 @@ class HelperApp(object):
                     message=f"Received the status code <{response.status_code}: {response.reason}> from the IdP")
 
         key = asymmetric_upload_derivation_variable_based(zkp.responses, zkp.iteration, 32)
-        iv = asymmetric_upload_derivation_variable_based(zkp.responses, len(zkp.password), 16)
         asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
         # generate asymmetric keys
-        asymmetric_authentication.generate_keys()
-        response = requests.post("http://localhost:8082/save_asymmetric", data={
-            'id': saml_id,
+        self.password_manager.generate_keys()
+        response = requests.post(f"{self.idp}/save_asymmetric", data={
+            'id': self.password_manager.user_id,
             **self.cipher_auth.create_response(asymmetric_cipher_auth.create_response({
-                'key': asymmetric_authentication.get_public_key_str()
+                'key': self.password_manager.get_public_key_str()
             }))
         })
 
         response = asymmetric_cipher_auth.decipher_response(self.cipher_auth.decipher_response(response.json()))
         if 'status' in response and bool(response['status']):
-            asymmetric_authentication.save_key(id=saml_id, time_to_live=float(response['ttl']))
+            self.password_manager.save_private_key(time_to_live=float(response['ttl']))
+
+    @cherrypy.expose
+    def keychain(self, username: str, password: str):
+        if cherrypy.request.method != 'POST':
+            raise cherrypy.HTTPError(405)
+
+        self.password_manager = Password_Manager(username=username, master_password=password,
+                                                 idp=self.idp)
+        if not self.password_manager.load_password():
+            return Template(filename='static/authenticate.html').render(id=self.saml_id)
+        else:
+            if not self.password_manager.load_private_key():
+                self.zkp_auth()
+            else:
+                self.asymmetric_auth()
+
+        raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
+                                                   params={'id': self.saml_id}))
+
+    @cherrypy.expose
+    def zkp(self, password: str):
+        if cherrypy.request.method != 'POST':
+            raise cherrypy.HTTPError(405)
+
+        password = password.encode()
+        self.password_manager.save_password(password=password)
+        self.zkp_auth()
 
     @cherrypy.expose
     def authenticate(self, **kwargs):
+        if cherrypy.request.method != 'GET':
+            raise cherrypy.HTTPError(405)
+
+        self.idp = base64.urlsafe_b64decode(kwargs['idp']).decode()
+
+        max_iterations = int(kwargs['max_iterations'])
+        min_iterations = int(kwargs['min_iterations'])
+        if overlap_intervals(MIN_ITERATIONS_ALLOWED, MAX_ITERATIONS_ALLOWED, min_iterations, max_iterations):
+            self.iterations = random.randint(max(MIN_ITERATIONS_ALLOWED, min_iterations),
+                                             min(MAX_ITERATIONS_ALLOWED, max_iterations))
+        else:
+            return Template(filename='static/error.html').render(
+                message='The range of allowed iterations received from the IdP is incompatible with the range '
+                        'allowed by the local app. A possible cause for this is the IdP we are contacting is not '
+                        'a trusted one!')
+
+        self.saml_id = kwargs['id']
+            
+        key = base64.urlsafe_b64decode(kwargs['key'])
+        self.cipher_auth = Cipher_Authentication(key=key)
+            
+        return Template(filename='static/keychain.html').render()
+
+    @cherrypy.expose
+    def register(self, **kwargs):
         if cherrypy.request.method == 'GET':
-            max_iterations = int(kwargs['max_iterations'])
-            min_iterations = int(kwargs['min_iterations'])
-            if overlap_intervals(MIN_ITERATIONS_ALLOWED, MAX_ITERATIONS_ALLOWED, min_iterations, max_iterations):
-                self.iterations = random.randint(max(MIN_ITERATIONS_ALLOWED, min_iterations),
-                                                 min(MAX_ITERATIONS_ALLOWED, max_iterations))
-            else:
-                return Template(filename='static/error.html').render(
-                    message='The range of allowed iterations received from the IdP is incompatible with the range '
-                            'allowed by the local app. A possible cause for this is the IdP we are contacting is not '
-                            'a trusted one!')
-            
-            key = base64.urlsafe_b64decode(kwargs['key'])
-            self.cipher_auth = Cipher_Authentication(key=key)
-            
-            return Template(filename='static/authenticate.html').render(id=kwargs['id'])
+            return Template(filename='static/register.html').render()
         elif cherrypy.request.method == 'POST':
             username = kwargs['username']
-            password = kwargs['password'].encode()
+            master_password = kwargs['password'].encode()
 
-            asymmetric_authentication = Asymmetric_authentication(username=username, password=password)
-            if asymmetric_authentication.private_key:
-                self.asymmetric_auth(asymmetric_authentication, username=username, password=password,
-                                     saml_id=kwargs['id'])
-            else:
-                template = self.zkp_auth(asymmetric_authentication,
-                                         username=username, password=password, saml_id=kwargs['id'])
-                if template:
-                    return template
-            raise cherrypy.HTTPRedirect(create_get_url("http://127.0.0.1:8082/identity",
-                                                       params={
-                                                               'id': kwargs['id'],
-                                                       }))
+            master_password_manager = Master_Password_Manager(username=username, master_password=master_password)
+            if not master_password_manager.register_user():
+                return Template(filename='static/register.html').render(
+                    message='Error: The inserted user already exists!')
+            return Template(filename='static/register.html').render(
+                message='Success: The user was registered with success')
+        else:
+            raise cherrypy.HTTPError(405)
 
 
 if __name__ == '__main__':
