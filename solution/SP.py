@@ -9,7 +9,7 @@ from mako.template import Template
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.response import OneLogin_Saml2_Response
 
-from utils import create_directory
+from utils.utils import create_directory
 
 saml_settings = {
 	'idp': {

@@ -15,7 +15,7 @@ from saml2.config import Config
 from saml2.server import Server
 
 from queries import setup_database, get_user, save_user_key, get_user_key
-from utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
+from utils.utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
 	Cipher_Authentication, \
 	asymmetric_upload_derivation_variable_based, asymmetric_padding_encryption
 
@@ -103,12 +103,12 @@ class IdP(object):
 		current_zkp = zkp_values[saml_id]
 		request_args = current_zkp.decipher_response(kwargs)
 		if saml_id not in public_key_values:
-			id = request_args['id']
+			user_id = request_args['user_id']
 			username = request_args['username']
 			nonce_received = request_args['nonce'].encode()
 
-			public_key_db = get_user_key(id=id, username=username)
-			if len(public_key_db) > 0:
+			public_key_db = get_user_key(id=user_id, username=username)
+			if public_key_db and len(public_key_db) > 0:
 				if public_key_db[1] > datetime.now().timestamp():           # verify if the key is not expired
 					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
 
@@ -142,16 +142,18 @@ class IdP(object):
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
 	def save_asymmetric(self, **kwargs):
-		id = kwargs['id']
-		current_zkp = zkp_values[id]
+		saml_id = kwargs['saml_id']
+		current_zkp = zkp_values[saml_id]
 
 		key = asymmetric_upload_derivation_variable_based(current_zkp.responses, current_zkp.iteration, 32)
 		asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
-		key = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))['key']
+		request_args = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))
+		key = request_args['key']
+		user_id = request_args['user_id']
 		status = False
 		if current_zkp.saml_response:
-			status = save_user_key(id=id, username=current_zkp.username,
+			status = save_user_key(id=user_id, username=current_zkp.username,
 			                       key=key,
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
 		return current_zkp.create_response(asymmetric_cipher_auth.create_response({

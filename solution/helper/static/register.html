@@ -2,18 +2,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Keychain Opener</title>
+    <title>Register</title>
 </head>
 <body>
-    <h1>Keychain Opener</h1>
-    <form action="/keychain" method="post">
+    <h1>Register</h1>
+    <form action="/register" method="post">
     <label for="username">Username</label>
     <input type="text" id="username" name="username" />
 
     <label for="password">Master Password</label>
     <input type="password" id="password" name="password" />
     <br>
-    <input type="submit" value="Unlock keychain" />
+    <input type="submit" value="Register" />
+      % if context.get('message', UNDEFINED) is not UNDEFINED:
+        <br>
+        <br>
+        <br>
+        <h4>${message}</h4>
+      % endif
     </form>
 </body>
 </html>
