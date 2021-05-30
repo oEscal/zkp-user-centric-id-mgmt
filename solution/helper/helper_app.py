@@ -33,6 +33,20 @@ class HelperApp(object):
     def index(self):
         raise cherrypy.HTTPRedirect('/register')
 
+    @cherrypy.expose
+    def error(self, error_id: str):
+        errors = {
+            'asymmetric_challenge': "The response to the challenge sent to the IdP to authentication with "
+                                    "asymmetric keys is not valid. A possible cause for this is the IdP we "
+                                    "are contacting is not a trusted one!",
+            'zkp_idp_error': "Received error from IdP!",
+            'idp_iterations': "The range of allowed iterations received from the IdP is incompatible with the range "
+                              "allowed by the local app. A possible cause for this is the IdP we are contacting is not "
+                              "a trusted one!"
+
+        }
+        return Template(filename='static/error.html').render(message=errors[error_id])
+
     def asymmetric_auth(self):
         nonce_to_send = create_nonce()
         ciphered_params = self.cipher_auth.create_response({
@@ -54,10 +68,8 @@ class HelperApp(object):
             # verify the authenticity of the IdP
             if ('response' not in response_dict
                     or nonce_to_send != self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['response']))):
-                return Template(filename='static/error.html').render(
-                    message='The response to the challenge sent to the IdP to authentication '
-                            'with asymmetric keys is not valid. A possible cause for this is '
-                            'the IdP we are contacting is not a trusted one!')
+                raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+                                                           params={'error_id': 'asymmetric_challenge'}), 301)
             else:
                 nonce = response_dict['nonce'].encode()
                 challenge_response = self.password_manager.sign(nonce)
@@ -102,8 +114,9 @@ class HelperApp(object):
                 challenge_response = zkp.response(challenge)
                 data_send['response'] = challenge_response
             else:
-                return Template(filename='static/error.html').render(
-                    message=f"Received the status code <{response.status_code}: {response.reason}> from the IdP")
+                print(f"Error received from idp: <{response.status_code}: {response.reason}>")
+                raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+                                                           params={'error_id': 'zkp_idp_error'}), 301)
 
         key = asymmetric_upload_derivation_variable_based(zkp.responses, zkp.iteration, 32)
         asymmetric_cipher_auth = Cipher_Authentication(key=key)
@@ -172,10 +185,8 @@ class HelperApp(object):
             self.iterations = random.randint(max(MIN_ITERATIONS_ALLOWED, min_iterations),
                                              min(MAX_ITERATIONS_ALLOWED, max_iterations))
         else:
-            return Template(filename='static/error.html').render(
-                message='The range of allowed iterations received from the IdP is incompatible with the range '
-                        'allowed by the local app. A possible cause for this is the IdP we are contacting is not '
-                        'a trusted one!')
+            raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+                                                       params={'error_id': 'idp_iterations'}), 301)
 
         self.saml_id = kwargs['id']
 
