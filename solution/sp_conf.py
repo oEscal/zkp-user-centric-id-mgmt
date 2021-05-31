@@ -1,20 +1,6 @@
-from saml2.entity_category.edugain import COC
-from saml2 import BINDING_HTTP_REDIRECT
 from saml2 import BINDING_HTTP_POST
 from saml2.saml import NAME_FORMAT_URI
 
-try:
-    from saml2.sigver import get_xmlsec_binary
-except ImportError:
-    get_xmlsec_binary = None
-
-
-if get_xmlsec_binary:
-    xmlsec_path = get_xmlsec_binary(["/opt/local/bin","/usr/local/bin"])
-else:
-    xmlsec_path = '/usr/local/bin/xmlsec1'
-
-# Make sure the same port number appear in service_conf.py
 BASE = "http://127.0.0.1:8081"
 
 CONFIG = {
@@ -22,8 +8,8 @@ CONFIG = {
     "description": "Example SP",
     "service": {
         "sp": {
-            "want_response_signed": False,
-            "authn_requests_signed": False,
+            "want_response_signed": True,
+            "authn_requests_signed": True,
             "endpoints": {
                 "assertion_consumer_service": [
                     ("%s/identity" % BASE, BINDING_HTTP_POST)
@@ -41,5 +27,6 @@ CONFIG = {
             ]
         },
     },
+    'cert_file': "sp_certificate/server.crt",
     "name_form": NAME_FORMAT_URI,
 }

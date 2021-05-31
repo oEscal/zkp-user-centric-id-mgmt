@@ -8,11 +8,14 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from onelogin.saml2 import constants
+from onelogin.saml2.constants import OneLogin_Saml2_Constants
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
 from saml2.pack import http_form_post_message
 from saml2.samlp import AuthnRequest, authn_request_from_string
 from saml2.config import Config
 from saml2.server import Server
+from saml2.sigver import verify_redirect_signature
 
 from queries import setup_database, get_user, save_user_key, get_user_key
 from utils.utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
@@ -35,13 +38,22 @@ class IdP(object):
 	def create_saml_response(self, zkp: ZKP_IdP):
 		entity = self.server.response_args(zkp.saml_request)
 		response = self.server.create_authn_response(identity={'username': zkp.username},
-		                                             userid=zkp.username, **entity)
+		                                             userid=zkp.username, sign_response=True,
+		                                             authn={'authn_auth': 'ola',
+		                                                    'class_ref': OneLogin_Saml2_Constants.AC_UNSPECIFIED},
+		                                             **entity)
+		print(response)
 		zkp.saml_response = response
 
 	@cherrypy.expose
 	def login(self, **kwargs):
 		saml_request: AuthnRequest = authn_request_from_string(
 			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
+
+		_certs = self.server.metadata.certs(saml_request.issuer.text, "any", "signing")
+		for cert in _certs:
+			if not verify_redirect_signature(kwargs, self.server.sec.sec_backend, cert):
+				raise cherrypy.HTTPError(401, 'Message signature verification failure')
 
 		aes_key = urandom(32)
 		zkp_values[saml_request.id] = ZKP_IdP(key=aes_key, saml_request=saml_request,
@@ -50,7 +62,7 @@ class IdP(object):
 		                                           params={
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
 			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
-			                                           'id': saml_request.id,
+			                                           'saml_id': saml_request.id,
 			                                           'key': base64.urlsafe_b64encode(aes_key),
 			                                           'idp': base64.urlsafe_b64encode(
 				                                           f"http://{self.hostname}:{self.port}".encode())
@@ -59,8 +71,8 @@ class IdP(object):
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
 	def authenticate(self, **kwargs):
-		id = kwargs['id']
-		current_zkp = zkp_values[id]
+		saml_id = kwargs['saml_id']
+		current_zkp = zkp_values[saml_id]
 		request_args = current_zkp.decipher_response(kwargs)
 
 		challenge = request_args['nonce'].encode()
@@ -87,7 +99,7 @@ class IdP(object):
 
 		conf = Config()
 		conf.attribute_converters = {'username': [current_zkp.username]}
-		conf.entityid = id
+		conf.entityid = saml_id
 
 		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
 			self.create_saml_response(current_zkp)
@@ -125,7 +137,7 @@ class IdP(object):
 				else:
 					raise cherrypy.HTTPError(410, message="Expired key")
 			else:
-				raise cherrypy.HTTPError(424, message="No public key for the given id and username")
+				raise cherrypy.HTTPError(424, message="No public key for the given user id and username")
 		else:
 			response = base64.urlsafe_b64decode(request_args['response'])
 
@@ -163,13 +175,13 @@ class IdP(object):
 
 	@cherrypy.expose
 	def identity(self, **kwargs):
-		id = kwargs['id']
+		saml_id = kwargs['saml_id']
 		http_args = \
-			http_form_post_message(message=f"{zkp_values[id].saml_response}",
-			                      location=f"{zkp_values[id].saml_request.assertion_consumer_service_url}",
+			http_form_post_message(message=f"{zkp_values[saml_id].saml_response}",
+			                      location=f"{zkp_values[saml_id].saml_request.assertion_consumer_service_url}",
 			                      typ='SAMLResponse')
 		print(dict(http_args)['data'])
-		del zkp_values[id]
+		del zkp_values[saml_id]
 		return dict(http_args)['data']
 
 

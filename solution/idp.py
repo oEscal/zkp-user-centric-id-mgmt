@@ -34,16 +34,6 @@ if HTTPS:
 else:
     BASE = "http://%s:%s" % (HOST, PORT)
 
-# HTTPS cert information
-SERVER_CERT = None          # "pki/mycert.pem"
-SERVER_KEY = None           # "pki/mykey.pem"
-CERT_CHAIN = ""
-SIGN_ALG = None
-DIGEST_ALG = None
-#SIGN_ALG = ds.SIG_RSA_SHA512
-#DIGEST_ALG = ds.DIGEST_SHA512
-
-
 CONFIG = {
     "entityid": BASE,
     "description": "My IDP",
@@ -53,32 +43,10 @@ CONFIG = {
             "name": "IAA IdP",
             "endpoints": {
                 "single_sign_on_service": [
-                    ("%s/sso/redirect" % BASE, BINDING_HTTP_REDIRECT),
-                    ("%s/sso/post" % BASE, BINDING_HTTP_POST),
-                    ("%s/sso/art" % BASE, BINDING_HTTP_ARTIFACT),
-                    ("%s/sso/ecp" % BASE, BINDING_SOAP)
-                ],
-                "single_logout_service": [
-                    ("%s/slo/soap" % BASE, BINDING_SOAP),
-                    ("%s/slo/post" % BASE, BINDING_HTTP_POST),
-                    ("%s/slo/redirect" % BASE, BINDING_HTTP_REDIRECT)
-                ],
-                "artifact_resolve_service": [
-                    ("%s/ars" % BASE, BINDING_SOAP)
-                ],
-                "assertion_id_request_service": [
-                    ("%s/airs" % BASE, BINDING_URI)
-                ],
-                "manage_name_id_service": [
-                    ("%s/mni/soap" % BASE, BINDING_SOAP),
-                    ("%s/mni/post" % BASE, BINDING_HTTP_POST),
-                    ("%s/mni/redirect" % BASE, BINDING_HTTP_REDIRECT),
-                    ("%s/mni/art" % BASE, BINDING_HTTP_ARTIFACT)
-                ],
-                "name_id_mapping_service": [
-                    ("%s/nim" % BASE, BINDING_SOAP),
+                    ("%s/login" % BASE, BINDING_HTTP_REDIRECT),
                 ],
             },
+            "want_authn_requests_only_with_valid_cert": True,
             "policy": {
                 "default": {
                     "lifetime": {"minutes": 15},
@@ -94,6 +62,8 @@ CONFIG = {
     "metadata": {
         "local": [full_path("sp.xml")],
     },
+    'key_file': "idp_certificate/server.key",
+    'cert_file': "idp_certificate/server.crt",
     "organization": {
         "display_name": "IAA Identiteter",
         "name": "IAA Identiteter",

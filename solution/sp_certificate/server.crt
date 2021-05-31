@@ -1,4 +1,5 @@
-<ns0:EntityDescriptor xmlns:ns0="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ns1="http://www.w3.org/2000/09/xmldsig#" entityID="http://127.0.0.1:8081"><ns0:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" AuthnRequestsSigned="true" WantAssertionsSigned="true"><ns0:KeyDescriptor use="signing"><ns1:KeyInfo><ns1:X509Data><ns1:X509Certificate>MIIDQzCCAisCFHJXD9V2K23+qZN02NDobafL3bYmMA0GCSqGSIb3DQEBCwUAMF4x
+-----BEGIN CERTIFICATE-----
+MIIDQzCCAisCFHJXD9V2K23+qZN02NDobafL3bYmMA0GCSqGSIb3DQEBCwUAMF4x
 CzAJBgNVBAYTAlBUMQ8wDQYDVQQIDAZBdmVpcm8xDzANBgNVBAcMBkF2ZWlybzET
 MBEGA1UECgwKU1AgZXhhbXBsZTELMAkGA1UECwwCU1AxCzAJBgNVBAMMAlNQMB4X
 DTIxMDUzMDE1NDgwMloXDTIyMDUzMDE1NDgwMlowXjELMAkGA1UEBhMCUFQxDzAN
@@ -16,4 +17,4 @@ bQnnT0TZlBzZbMAy3HVkYfKDIFkz0KRCeplx9/ibaP3sMibWSQSr85ORpzGQfMyU
 mNxlPbs7qi+xjtCDYmYfv0iRMwhGyqhGl0zF60FxoKJ04TbXHAspBTbQBtlqP3/g
 01HD5v5yC+V3c8/Cad+ymrYB4ypRSVFzFdIceFKkudc4xLCppbh0/vpT8ggoKVQe
 CGaBr0vBb4i+poDsksLQ2wKWfrnKjqc=
-</ns1:X509Certificate></ns1:X509Data></ns1:KeyInfo></ns0:KeyDescriptor><ns0:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="http://127.0.0.1:8081/identity" index="1" /><ns0:AttributeConsumingService index="1"><ns0:ServiceName xml:lang="en" /><ns0:ServiceDescription xml:lang="en">Example SP</ns0:ServiceDescription><ns0:RequestedAttribute Name="username" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri" isRequired="true" /></ns0:AttributeConsumingService></ns0:SPSSODescriptor></ns0:EntityDescriptor>
+-----END CERTIFICATE-----

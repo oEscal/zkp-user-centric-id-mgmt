@@ -99,7 +99,7 @@ class HelperApp(object):
                    } if zkp.iteration < 2 else {})
             })
             response = requests.get(f"{self.idp}/authenticate", params={
-                'id': self.saml_id,
+                'saml_id': self.saml_id,
                 **ciphered_params
             })
 
@@ -150,7 +150,7 @@ class HelperApp(object):
         self.password_manager = Password_Manager(username=username, master_password=password,
                                                  idp=self.idp)
         if not self.password_manager.load_password():
-            return Template(filename='static/authenticate.html').render(id=self.saml_id)
+            return Template(filename='static/authenticate.html').render(saml_id=self.saml_id)
         else:
             if not self.password_manager.load_private_key():
                 self.zkp_auth()
@@ -158,10 +158,10 @@ class HelperApp(object):
                 self.asymmetric_auth()
 
         raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'id': self.saml_id}))
+                                                   params={'saml_id': self.saml_id}))
 
     @cherrypy.expose
-    def zkp(self, password: str, id: str):
+    def zkp(self, password: str, saml_id: str):
         if cherrypy.request.method != 'POST':
             raise cherrypy.HTTPError(405)
 
@@ -170,7 +170,7 @@ class HelperApp(object):
         self.zkp_auth()
 
         raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'id': self.saml_id}))
+                                                   params={'saml_id': self.saml_id}))
 
     @cherrypy.expose
     def authenticate(self, **kwargs):
@@ -188,7 +188,7 @@ class HelperApp(object):
             raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
                                                        params={'error_id': 'idp_iterations'}), 301)
 
-        self.saml_id = kwargs['id']
+        self.saml_id = kwargs['saml_id']
 
         key = base64.urlsafe_b64decode(kwargs['key'])
         self.cipher_auth = Cipher_Authentication(key=key)

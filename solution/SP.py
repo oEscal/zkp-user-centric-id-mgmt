@@ -7,7 +7,6 @@ import hashlib
 import cherrypy
 from mako.template import Template
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
-from onelogin.saml2.response import OneLogin_Saml2_Response
 
 from utils.utils import create_directory
 
@@ -17,27 +16,26 @@ saml_settings = {
 		'singleSignOnService': {
 			'url': "http://127.0.0.1:8082/login",
 			'binding': "url:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
-		}
+		},
+		'x509cert': "MIIDSzCCAjMCFAjkfHTmE6gJanQledaOPjWk5ovpMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlBUMQ8wDQYDVQQIDAZBdmVpcm8xDzANBgNVBAcMBkF2ZWlybzEUMBIGA1UECgwLSWRQIGV4YW1wbGUxDTALBgNVBAsMBEF1dGgxDDAKBgNVBAMMA0lkUDAeFw0yMTA1MzAxNDA2MDFaFw0yMjA1MzAxNDA2MDFaMGIxCzAJBgNVBAYTAlBUMQ8wDQYDVQQIDAZBdmVpcm8xDzANBgNVBAcMBkF2ZWlybzEUMBIGA1UECgwLSWRQIGV4YW1wbGUxDTALBgNVBAsMBEF1dGgxDDAKBgNVBAMMA0lkUDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMKHGOTPvhz3UMKpEBC7e3Lj4DGXFqcAzSBscw+S5+fZTfBahCBWK1TpWKfus7tMZ1SZYppiOWaZLEs7cuLqlUXiXl/j+FMzocBNt0HMLAlvz1MYgI1ni8fHVjPmQ0X2GB0fpC1RwgH437fj7UbnIQ6sJoXOJr9uxcfnbL2HuMQQgmuoW5goPiKn/jSZLhIezj7jl/FLr2ii2jJAe6bAjeMebgfoGdoMnN12ULWVXQ7zZCDvNvZM8eceKQkZhiFh/sAKJlGOzLLawz/MCCONYgkTqAuC5QKbi7NMc+ki8N+Pm3cJLwGWaXakyI+WGRzQnrAwOgkn86TgvS0fGhp7lXUCAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAdBf/Z6FqG8iI1haiF8XoDPpGOmXCP+V0ObuTtVqQzjNGdumjBW8Lq/GamWpCBZI4AjW3C4BK63bZMzsrb5+gh5Iy4sc7Ww79SnZ8RjjZ0HnODGVV5bVhT4xe71ByhwAuWroY/OgmKh5C0aRZidosiioo7vDi0uqdjee0KaDwc0shq1yVGohvyN462zOfygQn0vX2apUoIU/SUpAK76JliL5QoJ7IOjSIecgjJz39BTgNPceFgP4bgtNfFHhohGXRKshS2D9gX/8+La374VHsMgp/TGGTTTnJNwR6YvqTSW6/MCr0klNotFVhPLtlLwHWErv9dx10u5ww7U1x4T5vbw=="
 	},
 	'sp': {
 		'entityId': "http://127.0.0.1:8081",
 		'assertionConsumerService': {
 			'url': "http://127.0.0.1:8081/identity",
 			'binding': "url:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
-		}
+		},
+		'x509cert': "MIIDQzCCAisCFHJXD9V2K23+qZN02NDobafL3bYmMA0GCSqGSIb3DQEBCwUAMF4xCzAJBgNVBAYTAlBUMQ8wDQYDVQQIDAZBdmVpcm8xDzANBgNVBAcMBkF2ZWlybzETMBEGA1UECgwKU1AgZXhhbXBsZTELMAkGA1UECwwCU1AxCzAJBgNVBAMMAlNQMB4XDTIxMDUzMDE1NDgwMloXDTIyMDUzMDE1NDgwMlowXjELMAkGA1UEBhMCUFQxDzANBgNVBAgMBkF2ZWlybzEPMA0GA1UEBwwGQXZlaXJvMRMwEQYDVQQKDApTUCBleGFtcGxlMQswCQYDVQQLDAJTUDELMAkGA1UEAwwCU1AwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCtLrPX8cKXqbPxvACqoYCbq/ZtU8pdJUC46m5HT/DosUq2gd9QCKMKCCCU5XqnaZmHXy9i5h/hZjvYbH7RhETp60SixE0T32CAQwdo7ATTONWQN8wubvyvScO84nWfahpQc4KgtjBWwy2iEAJ8MNd5pR3wu1GAn/1jmW+p+tWJipppyA17mupl8R8ZF0eKuGRnhDrokSE5AWudXSfxnyAWF6OFCH3WeIX0yxLnZpaN6EM/USeV7C0mMrb+I82FJtT0rspyasFrQdSdf1z5gpmHqMAYSZ5Kqd2cF3hsmPqrEUXMF9Kv7uM/7H9F0RC+pTtKKDRsJ4HkPFuFi3nw2P9jAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAKTSbnpvAHyfVPdZvWpYobHVD0CiQSp6rUNrZs8xmQKBTTXnIh5FeLzxYiZ3ugm6PNanNez0hx8GyTZmqUehhhEr7PIokdYVoWmPZDab8xazW+qsw8/d0Wy9bQnnT0TZlBzZbMAy3HVkYfKDIFkz0KRCeplx9/ibaP3sMibWSQSr85ORpzGQfMyUmNxlPbs7qi+xjtCDYmYfv0iRMwhGyqhGl0zF60FxoKJ04TbXHAspBTbQBtlqP3/g01HD5v5yC+V3c8/Cad+ymrYB4ypRSVFzFdIceFKkudc4xLCppbh0/vpT8ggoKVQeCGaBr0vBb4i+poDsksLQ2wKWfrnKjqc=",
+		'privateKey': "MIIEpAIBAAKCAQEArS6z1/HCl6mz8bwAqqGAm6v2bVPKXSVAuOpuR0/w6LFKtoHfUAijCggglOV6p2mZh18vYuYf4WY72Gx+0YRE6etEosRNE99ggEMHaOwE0zjVkDfMLm78r0nDvOJ1n2oaUHOCoLYwVsMtohACfDDXeaUd8LtRgJ/9Y5lvqfrViYqaacgNe5rqZfEfGRdHirhkZ4Q66JEhOQFrnV0n8Z8gFhejhQh91niF9MsS52aWjehDP1EnlewtJjK2/iPNhSbU9K7KcmrBa0HUnX9c+YKZh6jAGEmeSqndnBd4bJj6qxFFzBfSr+7jP+x/RdEQvqU7Sig0bCeB5DxbhYt58Nj/YwIDAQABAoIBAQCcr2prcAJc8V8q0KvRtTkEnzrfgzXNvEyogQGxZ3RRM0ajhTEj2gyYoO3JiS3FldcgEVBwLECfz71JfC/pI8Ct2vxIP051Ml6+7OYhWZir+fnO94y2XhgkB5seo81Do92W+EsxWGS3uvLoc4+sCQyKtIc4LGH6+8VnfYT3x0e3ncA085ma2lXQdsSsGEUEiLVzjLLIwjVI/ilMk7EZVGM0T/tmoXPedS21c474h07D5/oDSxSsVa2AzygF+Ob4cgUvKtVl0ck/cKV9NH+6GlyhZ99mAnKWhDdKRJDXTCpdoyQnlEk6pJc13vS2voOpRj4+lSrNlyjfZXyvsFIaJccRAoGBANXuMBfwb9IOx5eeb1ngon+NSbAwmyPd29oK7rEM1ubMY5NjpRtPzArXQ34WtJKf2/HQTmVbla04fIoAsP1BXXHbjhPMmoGgWXjYKdvUFPbn1HdZQQ2/qxw1z5zr+pRzXR1SA7GBkoE1uQGTZAaeoW9Cv/sEQ/5Lf8E9d1QUWa+1AoGBAM89J7p8wcNi8kcpkeDqbyuvCTwknCs6cKO4Ld4r+IRFS1/PnJbUCcxH8pVpIHEl4OBGo0GlxbN+iucIlWRzp4xiow4vlmHB1TGL8AgDQDQkLLyrt79mjV71iydB33k/9fuvMLL6XuV4Ydl2NY7uaomdMy62ZdJnwf/HuYIC5/G3AoGAOvS6Yk6LsnsKPFmYXE+Q2NAKJ7kteBPzO8LZhwd/zfkz0/GZFc7G75HlcsE1IFdX2OtMP5iexi8T+0A3hoPWCcO1AvXW+rRDFA+WcZOf929qWT3KtMxGjq6xuZA67WBhn+vzQp7vzhYNF0cUQNLEsJHXsIi7aEBMQ+f5k71L/iUCgYEAjg3SfL9lpkPd5S+2giDQgXYi82n47pzJd0AZmNA1Mp25M/zAzpab/L5Yp1f/V+/p/HIPGEHEiew01HcKyGeKsu0t7dxqzamrNKJCr4ti6Brf25gthPKL90qCzy8VOyy/tXz5+cUrZUomcITZ45bDyn7KBbwbgaWD0ouaOmc5jHMCgYAx/PRhfxMfOPDY5J/4Ku3anoV2XGzGNMpw5TNRELLx8m23kp/g9bglGb0yUBcJ2h5+iIy7HrR2LYLxGUJeDIfp+iCIpybtI/kDBbV6SiAj+ePiZxbJ9RoAhIU/g8gHqlBnIsmedPSEKU+PTmc3PWVmN+mGqFgs8cZXsPzQ4V7N4A=="
 	},
-	'strict': False
+	'security': {
+		'authnRequestsSigned': True,
+	},
+	'strict': True
 }
 
 
 clients_auth: typing.Dict[str, OneLogin_Saml2_Auth] = {}
-
-
-def dumb_validation(*args):
-	return True
-
-
-OneLogin_Saml2_Response.is_valid = dumb_validation
 
 
 class SP(object):
@@ -170,17 +168,20 @@ class SP(object):
 		"""
 		if cherrypy.request.method == 'POST':
 			cookies = cherrypy.request.cookie
+			request_id = cookies['sp_saml_id'].value
+
 			req = self.prepare_auth_parameter(cherrypy.request)
 			auth = OneLogin_Saml2_Auth(req, saml_settings)
-			auth.process_response()
+			auth.process_response(request_id=request_id)
 			errors = auth.get_errors()
 			if not errors:
 				if auth.is_authenticated():
-					clients_auth[cookies['sp_saml_id'].value] = auth
+					clients_auth[request_id] = auth
 				else:
 					print("Not Authenticated")
 			else:
 				print(f"Error when processing SAML response: {errors}")
+				print(f"{auth.get_last_error_reason()}")
 		return Template(filename='static/redirect_index.html').render()
 
 	@cherrypy.expose
