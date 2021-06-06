@@ -10,11 +10,11 @@ sys.path.append('..')
 
 from managers import Master_Password_Manager, Password_Manager
 from utils.utils import ZKP, overlap_intervals, \
-    Cipher_Authentication, asymmetric_upload_derivation_variable_based, create_nonce, \
+    Cipher_Authentication, asymmetric_upload_derivation_key, create_nonce, \
     create_get_url
 
-MIN_ITERATIONS_ALLOWED = 10
-MAX_ITERATIONS_ALLOWED = 15
+MIN_ITERATIONS_ALLOWED = 200
+MAX_ITERATIONS_ALLOWED = 500
 
 
 class HelperApp(object):
@@ -42,8 +42,9 @@ class HelperApp(object):
             'zkp_idp_error': "Received error from IdP!",
             'idp_iterations': "The range of allowed iterations received from the IdP is incompatible with the range "
                               "allowed by the local app. A possible cause for this is the IdP we are contacting is not "
-                              "a trusted one!"
-
+                              "a trusted one!",
+            'zkp_auth_error': "There was an error on ZKP authentication. This could mean that or the introduced "
+                              "password is incorrect, or the IdP we are contacting is not a trusted one!"
         }
         return Template(filename='static/error.html').render(message=errors[error_id])
 
@@ -118,22 +119,29 @@ class HelperApp(object):
                 raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
                                                            params={'error_id': 'zkp_idp_error'}), 301)
 
-        key = asymmetric_upload_derivation_variable_based(zkp.responses, zkp.iteration, 32)
-        asymmetric_cipher_auth = Cipher_Authentication(key=key)
+        if zkp.all_ok:
+            # save the password locally
+            self.password_manager.save_password()
 
-        # generate asymmetric keys
-        self.password_manager.generate_keys()
-        response = requests.post(f"{self.idp}/save_asymmetric", data={
-            'saml_id': self.saml_id,
-            **self.cipher_auth.create_response(asymmetric_cipher_auth.create_response({
-                'user_id': self.password_manager.user_id,
-                'key': self.password_manager.get_public_key_str()
-            }))
-        })
+            # create asymmetric credentials
+            key = asymmetric_upload_derivation_key(zkp.responses, zkp.iteration, 32)
+            asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
-        response = asymmetric_cipher_auth.decipher_response(self.cipher_auth.decipher_response(response.json()))
-        if 'status' in response and bool(response['status']):
-            self.password_manager.save_private_key(time_to_live=float(response['ttl']))
+            # generate asymmetric keys
+            self.password_manager.generate_keys()
+            response = requests.post(f"{self.idp}/save_asymmetric", data={
+                'saml_id': self.saml_id,
+                **self.cipher_auth.create_response(asymmetric_cipher_auth.create_response({
+                    'key': self.password_manager.get_public_key_str()
+                }))
+            })
+
+            response = asymmetric_cipher_auth.decipher_response(self.cipher_auth.decipher_response(response.json()))
+            if 'status' in response and bool(response['status']):
+                self.password_manager.save_private_key(user_id=response['user_id'], time_to_live=float(response['ttl']))
+        else:
+            raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+                                                       params={'error_id': 'zkp_auth_error'}), 301)
 
     @cherrypy.expose
     def keychain(self, username: str, password: str):
@@ -166,7 +174,7 @@ class HelperApp(object):
             raise cherrypy.HTTPError(405)
 
         password = password.encode()
-        self.password_manager.save_password(password=password)
+        self.password_manager.password = password
         self.zkp_auth()
 
         raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",

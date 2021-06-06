@@ -102,8 +102,6 @@ class Password_Manager(object):
         self.salt_private_key: bytes = b''
 
     def generate_keys(self):
-        self.user_id = str(uuid.uuid4())
-
         self.private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048
@@ -114,7 +112,6 @@ class Password_Manager(object):
         try:
             with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{self.idp_base64}", "rb") as file:
                 salt_password = file.read(AES_KEY_SALT_SIZE)
-                self.salt_private_key = file.read(AES_KEY_SALT_SIZE)
                 iv = file.read(INITIALIZATION_VECTOR_SIZE)
                 ciphered_password = file.read()
 
@@ -134,6 +131,7 @@ class Password_Manager(object):
             with open(f"{KEYS_DIRECTORY}/{self.username}_{self.idp_base64}.pem", 'rb') as file:
                 self.user_id = file.readline().decode().rstrip()
                 time_to_live = float(file.readline())
+                self.salt_private_key = file.read(AES_KEY_SALT_SIZE)
                 pem = file.read()
 
             if time_to_live > datetime.now().timestamp():
@@ -149,19 +147,15 @@ class Password_Manager(object):
         except Exception:
             return False
 
-    def save_password(self, password: bytes):
-        self.password = password
-
+    def save_password(self):
         create_directory(KEYS_DIRECTORY)
 
         iv = urandom(INITIALIZATION_VECTOR_SIZE)
         salt_password = urandom(AES_KEY_SALT_SIZE)
-        self.salt_private_key = urandom(AES_KEY_SALT_SIZE)
         key = aes_key_derivation(self.master_password, salt_password)
         encryptor = aes_cipher(key=key, iv=iv).encryptor()
         with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{self.idp_base64}", "wb") as file:
             file.write(salt_password)                       # first AES_KEY_SALT_SIZE bytes
-            file.write(self.salt_private_key)               # first AES_KEY_SALT_SIZE bytes
             file.write(iv)                                  # first INITIALIZATION_VECTOR_SIZE bytes
 
             block_size = algorithms.AES(key).block_size
@@ -169,10 +163,14 @@ class Password_Manager(object):
             padded_data = padder.update(self.password) + padder.finalize()
             file.write(encryptor.update(padded_data) + encryptor.finalize())
 
-    def save_private_key(self, time_to_live: float):
+    def save_private_key(self, user_id: str, time_to_live: float):
+        self.user_id = user_id
+
+        self.salt_private_key = urandom(AES_KEY_SALT_SIZE)
         with open(f"{KEYS_DIRECTORY}/{self.username}_{self.idp_base64}.pem", 'wb') as file:
             file.write(f"{self.user_id}\n".encode())
             file.write(f"{(datetime.now() + timedelta(minutes=time_to_live)).timestamp()}\n".encode())
+            file.write(self.salt_private_key)  # first AES_KEY_SALT_SIZE bytes
             file.write(self.get_private_key_bytes(secret=self.private_key_secret()))
 
     def sign(self, data: bytes) -> bytes:

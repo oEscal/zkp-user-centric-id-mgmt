@@ -1,5 +1,6 @@
 import base64
 import typing
+import uuid
 from datetime import datetime, timedelta
 from os import urandom
 
@@ -8,7 +9,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
-from onelogin.saml2 import constants
 from onelogin.saml2.constants import OneLogin_Saml2_Constants
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
 from saml2.pack import http_form_post_message
@@ -20,13 +20,13 @@ from saml2.sigver import verify_redirect_signature
 from queries import setup_database, get_user, save_user_key, get_user_key
 from utils.utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
 	Cipher_Authentication, \
-	asymmetric_upload_derivation_variable_based, asymmetric_padding_encryption
+	asymmetric_upload_derivation_key, asymmetric_padding_encryption
 
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
-MAX_ITERATIONS_ALLOWED = 30
-MIN_ITERATIONS_ALLOWED = 10
-KEYS_TIME_TO_LIVE = 10       # minutes
+MIN_ITERATIONS_ALLOWED = 300
+MAX_ITERATIONS_ALLOWED = 1000
+KEYS_TIME_TO_LIVE = 60       # minutes
 
 
 class IdP(object):
@@ -39,8 +39,7 @@ class IdP(object):
 		entity = self.server.response_args(zkp.saml_request)
 		response = self.server.create_authn_response(identity={'username': zkp.username},
 		                                             userid=zkp.username, sign_response=True,
-		                                             authn={'authn_auth': 'ola',
-		                                                    'class_ref': OneLogin_Saml2_Constants.AC_UNSPECIFIED},
+		                                             authn={'class_ref': OneLogin_Saml2_Constants.AC_UNSPECIFIED},
 		                                             **entity)
 		print(response)
 		zkp.saml_response = response
@@ -157,12 +156,12 @@ class IdP(object):
 		saml_id = kwargs['saml_id']
 		current_zkp = zkp_values[saml_id]
 
-		key = asymmetric_upload_derivation_variable_based(current_zkp.responses, current_zkp.iteration, 32)
+		key = asymmetric_upload_derivation_key(current_zkp.responses, current_zkp.iteration, 32)
 		asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
 		request_args = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))
 		key = request_args['key']
-		user_id = request_args['user_id']
+		user_id = str(uuid.uuid4())
 		status = False
 		if current_zkp.saml_response:
 			status = save_user_key(id=user_id, username=current_zkp.username,
@@ -170,7 +169,8 @@ class IdP(object):
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
 		return current_zkp.create_response(asymmetric_cipher_auth.create_response({
 			'status': status,
-			'ttl': KEYS_TIME_TO_LIVE
+			'ttl': KEYS_TIME_TO_LIVE,
+			'user_id': user_id
 		}))
 
 	@cherrypy.expose

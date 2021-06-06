@@ -148,7 +148,7 @@ def aes_cipher(key: bytes, iv: bytes) -> Cipher:
 	return cipher
 
 
-def asymmetric_upload_derivation_variable_based(responses: bytes, variable: int, size: int) -> bytes:
+def asymmetric_upload_derivation_key(responses: bytes, variable: int, size: int) -> bytes:
 	result = b''
 	for i in range(size):
 		result += bytes([responses[(variable*i) % len(responses)]])
