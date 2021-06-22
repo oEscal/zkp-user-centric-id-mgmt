@@ -10,6 +10,10 @@ from onelogin.saml2.auth import OneLogin_Saml2_Auth
 
 from utils.utils import create_directory
 
+
+COOKIE_TTL = 200            # seconds
+
+
 saml_settings = {
 	'idp': {
 		'entityId': "http://127.0.0.1:8082",
@@ -65,7 +69,7 @@ class SP(object):
 		cookie = cherrypy.response.cookie
 		cookie[name] = value
 		cookie[name]['path'] = '/'
-		cookie[name]['max-age'] = '200'
+		cookie[name]['max-age'] = f"{COOKIE_TTL}"
 		cookie[name]['version'] = '1'
 
 	@staticmethod

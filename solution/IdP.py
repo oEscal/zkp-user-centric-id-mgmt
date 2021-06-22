@@ -26,12 +26,12 @@ zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
 MIN_ITERATIONS_ALLOWED = 300
 MAX_ITERATIONS_ALLOWED = 1000
-KEYS_TIME_TO_LIVE = 60       # minutes
+KEYS_TIME_TO_LIVE = 10       # minutes
 
 
 class IdP(object):
 	def __init__(self, hostname, port):
-		self.server = Server("idp")
+		self.server = Server("idp_conf")
 		self.hostname = hostname
 		self.port = port
 
