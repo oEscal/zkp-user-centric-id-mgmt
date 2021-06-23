@@ -48,6 +48,11 @@ class HelperApp(object):
         }
         return Template(filename='static/error.html').render(message=errors[error_id])
 
+    @cherrypy.expose
+    def login(self, sp: str, idp: str, id_attrs: str, consumer_url: str):
+        attrs = id_attrs.split(',')
+        return Template(filename='static/login_attributes.html').render(sp=sp, idp=idp, attrs=attrs)
+
     def asymmetric_auth(self):
         nonce_to_send = create_nonce()
         ciphered_params = self.cipher_auth.create_response({

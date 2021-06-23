@@ -8,10 +8,20 @@ import cherrypy
 from mako.template import Template
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 
-from utils.utils import create_directory
-
+from utils.utils import create_directory, create_get_url
 
 COOKIE_TTL = 200            # seconds
+
+
+HOST_NAME = '127.0.0.1'
+HOST_PORT = 8081
+# noinspection HttpUrlsUsage
+HOST_URL = f"http://{HOST_NAME}:{HOST_PORT}"
+
+IDP_HOST_NAME = '127.0.0.1'
+IDP_PORT = 8082
+# noinspection HttpUrlsUsage
+IDP_URL = f"http://{IDP_HOST_NAME}:{IDP_PORT}"
 
 
 saml_settings = {
@@ -42,6 +52,7 @@ saml_settings = {
 clients_auth: typing.Dict[str, OneLogin_Saml2_Auth] = {}
 
 
+# noinspection HttpUrlsUsage
 class SP(object):
 	@staticmethod
 	def random_name() -> str:
@@ -116,28 +127,36 @@ class SP(object):
 		:return:
 		"""
 
-		def redirect_to_idp():
-			req = self.prepare_auth_parameter(cherrypy.request)
-			auth = OneLogin_Saml2_Auth(req, saml_settings)
-			login = auth.login()
-			login_id = auth.get_last_request_id()
-			clients_auth[login_id] = auth
-			self.set_cookie('sp_saml_id', login_id)
+		def redirect_to_helper():
+			# req = self.prepare_auth_parameter(cherrypy.request)
+			# auth = OneLogin_Saml2_Auth(req, saml_settings)
+			# login = auth.login()
+			# login_id = auth.get_last_request_id()
+			# clients_auth[login_id] = auth
+			# self.set_cookie('sp_saml_id', login_id)
 
-			raise cherrypy.HTTPRedirect(login, status=307)
+			raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/login",
+			                                           params={
+				                                           'sp': HOST_URL,
+				                                           'idp': IDP_URL,
+				                                           'id_attrs': ','.join(['username']),
+				                                           'consumer_url': f"{HOST_URL}/identity"
+			                                           }), 307)
+
+			# raise cherrypy.HTTPRedirect(login, status=307)
 
 		cookies = cherrypy.request.cookie
 		# if not cookies:
 		if 'sp_saml_id' not in cookies:
 			if redirect:
-				redirect_to_idp()
+				redirect_to_helper()
 			else:
 				return False
 
 		saml_id = cookies['sp_saml_id'].value
 		if saml_id not in clients_auth or not clients_auth[saml_id].get_attributes():
 			if redirect:
-				redirect_to_idp()
+				redirect_to_helper()
 			else:
 				return False
 
@@ -238,6 +257,6 @@ class SP(object):
 
 
 if __name__ == '__main__':
-	cherrypy.config.update({'server.socket_host': '127.0.0.1',
-                            'server.socket_port': 8081})
+	cherrypy.config.update({'server.socket_host': HOST_NAME,
+                            'server.socket_port': HOST_PORT})
 	cherrypy.quickstart(SP())
