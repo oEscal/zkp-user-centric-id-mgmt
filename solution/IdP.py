@@ -179,14 +179,16 @@ class IdP(Asymmetric_IdP):
 		}))
 
 	@cherrypy.expose
+	@cherrypy.tools.json_out()
 	def identity(self, **kwargs):
 		client_id = kwargs['client']
+		current_zkp = zkp_values[client_id]
 
-		response = {
-			'response': zkp_values[client_id].response_b64,
-			'signature': zkp_values[client_id].response_signature_b64
-		}
-		del zkp_values[client_id]
+		response = current_zkp.create_response({
+			'response': current_zkp.response_b64.decode(),
+			'signature': current_zkp.response_signature_b64.decode()
+		})
+		del current_zkp
 
 		return response
 

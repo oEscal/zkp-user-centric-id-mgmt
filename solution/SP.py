@@ -190,28 +190,30 @@ class SP(object):
 		return self.static_page('login.html')
 
 	@cherrypy.expose
-	def identity(self, **kwargs):
+	def identity(self, response, signature):
 		"""Identity provisioning by an IdP
 		:param username:
 		:return:
 		"""
 		if cherrypy.request.method == 'POST':
-			cookies = cherrypy.request.cookie
-			request_id = cookies['sp_saml_id'].value
-
-			req = self.prepare_auth_parameter(cherrypy.request)
-			auth = OneLogin_Saml2_Auth(req, saml_settings)
-			auth.process_response(request_id=request_id)
-			errors = auth.get_errors()
-			if not errors:
-				if auth.is_authenticated():
-					clients_auth[request_id] = auth
-				else:
-					print("Not Authenticated")
-			else:
-				print(f"Error when processing SAML response: {errors}")
-				print(f"{auth.get_last_error_reason()}")
-		return Template(filename='static/redirect_index.html').render()
+			print(response)
+			print(signature)
+			# cookies = cherrypy.request.cookie
+			# request_id = cookies['sp_saml_id'].value
+#
+			# req = self.prepare_auth_parameter(cherrypy.request)
+			# auth = OneLogin_Saml2_Auth(req, saml_settings)
+			# auth.process_response(request_id=request_id)
+			# errors = auth.get_errors()
+			# if not errors:
+			# 	if auth.is_authenticated():
+			# 		clients_auth[request_id] = auth
+			# 	else:
+			# 		print("Not Authenticated")
+			# else:
+			# 	print(f"Error when processing SAML response: {errors}")
+			# 	print(f"{auth.get_last_error_reason()}")
+		# return Template(filename='static/redirect_index.html').render()
 
 	@cherrypy.expose
 	def account(self) -> str:

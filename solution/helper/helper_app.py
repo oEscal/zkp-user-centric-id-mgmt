@@ -1,4 +1,5 @@
 import base64
+import json
 import random
 import uuid
 
@@ -31,6 +32,9 @@ class HelperApp(object):
         self.cipher_auth: Cipher_Authentication = None
         self.password_manager: Password_Manager = None
 
+        self.response_attrs_b64 = ''
+        self.response_signature_b64 = ''
+
     @staticmethod
     def static_contents(path):
         return open(f"static/{path}", 'r').read()
@@ -61,7 +65,8 @@ class HelperApp(object):
                                                                         consumer_url=consumer_url, client=client)
 
     @cherrypy.expose
-    def authorization(self, sp: str, idp: str, id_attrs: list, consumer_url: str, sso_url: str, client: str, **kwargs):
+    def authorize_attr_request(self, sp: str, idp: str, id_attrs: list, consumer_url: str, sso_url: str, client: str,
+                               **kwargs):
         if 'deny' in kwargs:
             return Template(filename='static/auth_refused.html').render()
         elif 'allow' in kwargs:
@@ -172,6 +177,17 @@ class HelperApp(object):
             raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
                                                        params={'error_id': 'zkp_auth_error'}), 301)
 
+    def request_attributes_end(self):
+        response = requests.get(f"{self.idp}/identity",
+                                params={
+                                    'client': self.idp_client,
+                                })
+        response_dict = self.cipher_auth.decipher_response(response.json())
+        self.response_attrs_b64 = response_dict['response']
+        self.response_signature_b64 = response_dict['signature']
+
+        raise cherrypy.HTTPRedirect("/attribute_presentation", 303)
+
     @cherrypy.expose
     def keychain(self, username: str, password: str):
         if cherrypy.request.method != 'POST':
@@ -194,8 +210,22 @@ class HelperApp(object):
             else:
                 self.asymmetric_auth()
 
-        raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'client': self.idp_client}))
+        self.request_attributes_end()
+
+    @cherrypy.expose
+    def attribute_presentation(self):
+        response_attrs = json.loads(base64.b64decode(self.response_attrs_b64))
+        return Template(filename='static/attr_presentation.html').render(idp=self.idp, sp=self.sp,
+                                                                        response_attrs=response_attrs)
+
+    @cherrypy.expose
+    def authorize_attr_response(self, **kwargs):
+        if 'deny' in kwargs:
+            return Template(filename='static/auth_refused.html').render()
+        elif 'allow' in kwargs:
+            return Template(filename='static/post_id_attr.html').render(consumer_url=self.consumer_url,
+                                                                        response=self.response_attrs_b64,
+                                                                        signature=self.response_signature_b64)
 
     @cherrypy.expose
     def zkp(self, password: str):
@@ -206,8 +236,7 @@ class HelperApp(object):
         self.password_manager.password = password
         self.zkp_auth()
 
-        raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'client': self.idp_client}))
+        self.request_attributes_end()
 
     @cherrypy.expose
     def authenticate(self, **kwargs):
