@@ -1,5 +1,6 @@
 import base64
 import random
+import uuid
 
 import cherrypy
 import requests
@@ -21,7 +22,12 @@ class HelperApp(object):
     def __init__(self):
         self.iterations = 0
         self.idp = None
-        self.saml_id: str = ''
+        self.sp = None
+        self.id_attrs = []
+        self.sso_url = None
+        self.consumer_url = None
+        self.idp_client = ''
+        self.sp_client = ''
         self.cipher_auth: Cipher_Authentication = None
         self.password_manager: Password_Manager = None
 
@@ -49,9 +55,27 @@ class HelperApp(object):
         return Template(filename='static/error.html').render(message=errors[error_id])
 
     @cherrypy.expose
-    def login(self, sp: str, idp: str, id_attrs: str, consumer_url: str):
+    def login(self, sp: str, idp: str, id_attrs: str, consumer_url: str, sso_url: str, client: str):
         attrs = id_attrs.split(',')
-        return Template(filename='static/login_attributes.html').render(sp=sp, idp=idp, attrs=attrs)
+        return Template(filename='static/login_attributes.html').render(sp=sp, idp=idp, id_attrs=attrs, sso_url=sso_url,
+                                                                        consumer_url=consumer_url, client=client)
+
+    @cherrypy.expose
+    def authorization(self, sp: str, idp: str, id_attrs: list, consumer_url: str, sso_url: str, client: str, **kwargs):
+        if 'deny' in kwargs:
+            return Template(filename='static/auth_refused.html').render()
+        elif 'allow' in kwargs:
+            self.sp = sp
+            self.idp = idp
+            self.id_attrs = [e for e in id_attrs if e]
+            self.consumer_url = consumer_url
+            self.sso_url = sso_url
+            self.sp_client = client
+
+            raise cherrypy.HTTPRedirect(create_get_url(self.sso_url,
+                                                       params={
+                                                           'id_attrs': ','.join(self.id_attrs)
+                                                       }), status=303)
 
     def asymmetric_auth(self):
         nonce_to_send = create_nonce()
@@ -62,7 +86,7 @@ class HelperApp(object):
         })
         response = requests.get(f"{self.idp}/authenticate_asymmetric",
                                 params={
-                                    'saml_id': self.saml_id,
+                                    'client': self.idp_client,
                                     **ciphered_params
                                 })
         if response.status_code != 200:
@@ -81,7 +105,7 @@ class HelperApp(object):
                 challenge_response = self.password_manager.sign(nonce)
                 response = requests.get(f"{self.idp}/authenticate_asymmetric",
                                         params={
-                                            'saml_id': self.saml_id,
+                                            'client': self.idp_client,
                                             **self.cipher_auth.create_response({
                                                 'response': base64.urlsafe_b64encode(challenge_response).decode()
                                             })
@@ -105,7 +129,7 @@ class HelperApp(object):
                    } if zkp.iteration < 2 else {})
             })
             response = requests.get(f"{self.idp}/authenticate", params={
-                'saml_id': self.saml_id,
+                'client': self.idp_client,
                 **ciphered_params
             })
 
@@ -135,7 +159,7 @@ class HelperApp(object):
             # generate asymmetric keys
             self.password_manager.generate_keys()
             response = requests.post(f"{self.idp}/save_asymmetric", data={
-                'saml_id': self.saml_id,
+                'client': self.idp_client,
                 **self.cipher_auth.create_response(asymmetric_cipher_auth.create_response({
                     'key': self.password_manager.get_public_key_str()
                 }))
@@ -163,7 +187,7 @@ class HelperApp(object):
         self.password_manager = Password_Manager(username=username, master_password=password,
                                                  idp=self.idp)
         if not self.password_manager.load_password():
-            return Template(filename='static/authenticate.html').render(saml_id=self.saml_id)
+            return Template(filename='static/authenticate.html').render()
         else:
             if not self.password_manager.load_private_key():
                 self.zkp_auth()
@@ -171,10 +195,10 @@ class HelperApp(object):
                 self.asymmetric_auth()
 
         raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'saml_id': self.saml_id}))
+                                                   params={'client': self.idp_client}))
 
     @cherrypy.expose
-    def zkp(self, password: str, saml_id: str):
+    def zkp(self, password: str):
         if cherrypy.request.method != 'POST':
             raise cherrypy.HTTPError(405)
 
@@ -183,14 +207,12 @@ class HelperApp(object):
         self.zkp_auth()
 
         raise cherrypy.HTTPRedirect(create_get_url(f"{self.idp}/identity",
-                                                   params={'saml_id': self.saml_id}))
+                                                   params={'client': self.idp_client}))
 
     @cherrypy.expose
     def authenticate(self, **kwargs):
         if cherrypy.request.method != 'GET':
             raise cherrypy.HTTPError(405)
-
-        self.idp = base64.urlsafe_b64decode(kwargs['idp']).decode()
 
         max_iterations = int(kwargs['max_iterations'])
         min_iterations = int(kwargs['min_iterations'])
@@ -201,7 +223,7 @@ class HelperApp(object):
             raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
                                                        params={'error_id': 'idp_iterations'}), 301)
 
-        self.saml_id = kwargs['saml_id']
+        self.idp_client = kwargs['client']
 
         key = base64.urlsafe_b64decode(kwargs['key'])
         self.cipher_auth = Cipher_Authentication(key=key)

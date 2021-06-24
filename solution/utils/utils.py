@@ -80,13 +80,16 @@ class Cipher_Authentication(object):
 
 
 class ZKP_IdP(ZKP, Cipher_Authentication):
-	def __init__(self, key: bytes, saml_request: AuthnRequest, max_iterations: int):
+	def __init__(self, key: bytes, id_attrs: list, max_iterations: int):
 		ZKP.__init__(self, password=b'')
 		Cipher_Authentication.__init__(self, key=key)
+
 		self.username = b''
-		self.saml_request: AuthnRequest = saml_request
-		self.saml_response = None
+		self.id_attrs = id_attrs
 		self.max_iterations = max_iterations
+
+		self.response_b64 = b''
+		self.response_signature_b64 = b''
 
 
 def create_get_url(url: str, params: dict = None):

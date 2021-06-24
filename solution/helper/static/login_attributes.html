@@ -9,21 +9,28 @@
 <h1>Permission Request</h1>
 
 <form action="/authorization" method="post">
+    <input type="hidden" name="client" value="${client}"/>
+    <input type="hidden" name="consumer_url" value="${consumer_url}"/>
+    <input type="hidden" name="sp" value="${sp}"/>
+    <input type="hidden" name="idp" value="${idp}"/>
+    <input type="hidden" name="sso_url" value="${sso_url}"/>
 
     <h4>The Service Provider '<a href="${sp}">${sp}</a>' requested permission to access the following information:
     </h4>
 
+    <input type="hidden" name="id_attrs" value=""/>
     <ul>
-        % for attr in attrs:
+        % for attr in id_attrs:
         <li>${attr}</li>
+        <input type="hidden" name="id_attrs" value="${attr}"/>
         % endfor
     </ul>
 
     <h4>This information will be requested to the Identity Provider '<a href="${idp}">${idp}</a>'.
     </h4>
 
-    <button type="submit">Allow</button>
-    <button type="submit">Deny</button>
+    <button type="submit" name="allow">Allow</button>
+    <button type="submit" name="deny">Deny</button>
 </form>
 
 </body>

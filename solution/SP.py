@@ -1,4 +1,5 @@
 import typing
+import uuid
 from pathlib import Path
 import os
 import base64
@@ -135,12 +136,17 @@ class SP(object):
 			# clients_auth[login_id] = auth
 			# self.set_cookie('sp_saml_id', login_id)
 
+			client_id = str(uuid.uuid4())
+			clients_auth[client_id] = False
+
 			raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/login",
 			                                           params={
 				                                           'sp': HOST_URL,
 				                                           'idp': IDP_URL,
 				                                           'id_attrs': ','.join(['username']),
-				                                           'consumer_url': f"{HOST_URL}/identity"
+				                                           'consumer_url': f"{HOST_URL}/identity",
+				                                           'sso_url': f"{IDP_URL}/login",
+				                                           'client': client_id
 			                                           }), 307)
 
 			# raise cherrypy.HTTPRedirect(login, status=307)

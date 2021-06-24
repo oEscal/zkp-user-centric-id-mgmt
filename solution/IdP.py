@@ -1,4 +1,5 @@
 import base64
+import json
 import typing
 import uuid
 from datetime import datetime, timedelta
@@ -7,15 +8,9 @@ from os import urandom
 import cherrypy
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_pem_private_key
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
-from onelogin.saml2.constants import OneLogin_Saml2_Constants
-from onelogin.saml2.utils import OneLogin_Saml2_Utils
-from saml2.pack import http_form_post_message
-from saml2.samlp import AuthnRequest, authn_request_from_string
-from saml2.config import Config
 from saml2.server import Server
-from saml2.sigver import verify_redirect_signature
 
 from queries import setup_database, get_user, save_user_key, get_user_key
 from utils.utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
@@ -29,49 +24,63 @@ MAX_ITERATIONS_ALLOWED = 1000
 KEYS_TIME_TO_LIVE = 10       # minutes
 
 
-class IdP(object):
+KEY_PATH_NAME = f"idp_certificate/server.key"
+
+
+class Asymmetric_IdP(object):
+	def __init__(self):
+		with open(KEY_PATH_NAME, 'rb') as file:
+			pem = file.read()
+
+		self.private_key = load_pem_private_key(
+			data=pem,
+			password=None,
+			backend=default_backend()
+		)
+
+	def sign(self, data: bytes) -> bytes:
+		return self.private_key.sign(data=data, padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
+
+
+class IdP(Asymmetric_IdP):
 	def __init__(self, hostname, port):
+		super().__init__()
+
 		self.server = Server("idp_conf")
 		self.hostname = hostname
 		self.port = port
 
-	def create_saml_response(self, zkp: ZKP_IdP):
-		entity = self.server.response_args(zkp.saml_request)
-		response = self.server.create_authn_response(identity={'username': zkp.username},
-		                                             userid=zkp.username, sign_response=True,
-		                                             authn={'class_ref': OneLogin_Saml2_Constants.AC_UNSPECIFIED},
-		                                             **entity)
-		print(response)
-		zkp.saml_response = response
+	@staticmethod
+	def create_attr_response(zkp: ZKP_IdP):
+		response_dict = dict()
+		if 'username' in zkp.id_attrs:
+			response_dict['username'] = zkp.username
+		'''add here more attributes if needed'''
+
+		zkp.response_b64 = base64.urlsafe_b64encode(json.dumps(response_dict).encode())
+		zkp.response_signature_b64 = base64.urlsafe_b64encode(zkp.response_b64)
 
 	@cherrypy.expose
-	def login(self, **kwargs):
-		saml_request: AuthnRequest = authn_request_from_string(
-			OneLogin_Saml2_Utils.decode_base64_and_inflate(kwargs['SAMLRequest']))
-
-		_certs = self.server.metadata.certs(saml_request.issuer.text, "any", "signing")
-		for cert in _certs:
-			if not verify_redirect_signature(kwargs, self.server.sec.sec_backend, cert):
-				raise cherrypy.HTTPError(401, 'Message signature verification failure')
+	def login(self, id_attrs: str):
+		attrs = id_attrs.split(',')
+		client_id = str(uuid.uuid4())
 
 		aes_key = urandom(32)
-		zkp_values[saml_request.id] = ZKP_IdP(key=aes_key, saml_request=saml_request,
-		                                      max_iterations=MAX_ITERATIONS_ALLOWED)
+		zkp_values[client_id] = ZKP_IdP(key=aes_key, id_attrs=attrs,
+		                                max_iterations=MAX_ITERATIONS_ALLOWED)
 		raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/authenticate",
 		                                           params={
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
 			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
-			                                           'saml_id': saml_request.id,
-			                                           'key': base64.urlsafe_b64encode(aes_key),
-			                                           'idp': base64.urlsafe_b64encode(
-				                                           f"http://{self.hostname}:{self.port}".encode())
+			                                           'client': client_id,
+			                                           'key': base64.urlsafe_b64encode(aes_key)
 		                                           }), 307)
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
 	def authenticate(self, **kwargs):
-		saml_id = kwargs['saml_id']
-		current_zkp = zkp_values[saml_id]
+		client_id = kwargs['client']
+		current_zkp = zkp_values[client_id]
 		request_args = current_zkp.decipher_response(kwargs)
 
 		challenge = request_args['nonce'].encode()
@@ -96,12 +105,8 @@ class IdP(object):
 		challenge_response = current_zkp.response(challenge)
 		nonce = current_zkp.create_challenge()
 
-		conf = Config()
-		conf.attribute_converters = {'username': [current_zkp.username]}
-		conf.entityid = saml_id
-
 		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
-			self.create_saml_response(current_zkp)
+			self.create_attr_response(current_zkp)
 		return current_zkp.create_response({
 			'nonce': nonce,
 			'response': challenge_response
@@ -110,10 +115,10 @@ class IdP(object):
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
 	def authenticate_asymmetric(self, **kwargs):
-		saml_id = kwargs['saml_id']
-		current_zkp = zkp_values[saml_id]
+		client_id = kwargs['client']
+		current_zkp = zkp_values[client_id]
 		request_args = current_zkp.decipher_response(kwargs)
-		if saml_id not in public_key_values:
+		if client_id not in public_key_values:
 			user_id = request_args['user_id']
 			username = request_args['username']
 			nonce_received = request_args['nonce'].encode()
@@ -128,7 +133,7 @@ class IdP(object):
 
 					current_zkp.username = username
 					nonce = create_nonce()
-					public_key_values[saml_id] = (public_key, nonce)
+					public_key_values[client_id] = (public_key, nonce)
 					return current_zkp.create_response({
 						'nonce': nonce.decode(),
 						'response': base64.urlsafe_b64encode(challenge_response).decode()
@@ -140,21 +145,21 @@ class IdP(object):
 		else:
 			response = base64.urlsafe_b64decode(request_args['response'])
 
-			public_key, nonce = public_key_values[saml_id]
+			public_key, nonce = public_key_values[client_id]
 			try:
 				public_key.verify(signature=response, data=nonce,
 				                  padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
-				self.create_saml_response(current_zkp)
+				self.create_attr_response(current_zkp)
 			except InvalidSignature:
 				del current_zkp
-				del public_key_values[saml_id]
+				del public_key_values[client_id]
 				raise cherrypy.HTTPError(401, message="Authentication failed")
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
 	def save_asymmetric(self, **kwargs):
-		saml_id = kwargs['saml_id']
-		current_zkp = zkp_values[saml_id]
+		client_id = kwargs['client']
+		current_zkp = zkp_values[client_id]
 
 		key = asymmetric_upload_derivation_key(current_zkp.responses, current_zkp.iteration, 32)
 		asymmetric_cipher_auth = Cipher_Authentication(key=key)
@@ -163,7 +168,7 @@ class IdP(object):
 		key = request_args['key']
 		user_id = str(uuid.uuid4())
 		status = False
-		if current_zkp.saml_response:
+		if current_zkp.response_b64:
 			status = save_user_key(id=user_id, username=current_zkp.username,
 			                       key=key,
 			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
@@ -175,14 +180,15 @@ class IdP(object):
 
 	@cherrypy.expose
 	def identity(self, **kwargs):
-		saml_id = kwargs['saml_id']
-		http_args = \
-			http_form_post_message(message=f"{zkp_values[saml_id].saml_response}",
-			                      location=f"{zkp_values[saml_id].saml_request.assertion_consumer_service_url}",
-			                      typ='SAMLResponse')
-		print(dict(http_args)['data'])
-		del zkp_values[saml_id]
-		return dict(http_args)['data']
+		client_id = kwargs['client']
+
+		response = {
+			'response': zkp_values[client_id].response_b64,
+			'signature': zkp_values[client_id].response_signature_b64
+		}
+		del zkp_values[client_id]
+
+		return response
 
 
 if __name__ == '__main__':
