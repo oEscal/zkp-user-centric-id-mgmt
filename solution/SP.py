@@ -133,11 +133,6 @@ class SP(object):
 		"""
 
 		def redirect_to_helper():
-			# req = self.prepare_auth_parameter(cherrypy.request)
-			# auth = OneLogin_Saml2_Auth(req, saml_settings)
-			# login = auth.login()
-			# login_id = auth.get_last_request_id()
-			# clients_auth[login_id] = auth
 			client_id = str(uuid.uuid4())
 			clients_auth[client_id] = dict()
 
@@ -152,8 +147,6 @@ class SP(object):
 				                                           'sso_url': f"{IDP_URL}/login",
 				                                           'client': client_id
 			                                           }), 307)
-
-			# raise cherrypy.HTTPRedirect(login, status=307)
 
 		cookies = cherrypy.request.cookie
 		# if not cookies:

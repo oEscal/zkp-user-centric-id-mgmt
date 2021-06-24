@@ -54,7 +54,9 @@ class HelperApp(object):
                               "allowed by the local app. A possible cause for this is the IdP we are contacting is not "
                               "a trusted one!",
             'zkp_auth_error': "There was an error on ZKP authentication. This could mean that or the introduced "
-                              "password is incorrect, or the IdP we are contacting is not a trusted one!"
+                              "password is incorrect, or the IdP we are contacting is not a trusted one!",
+            'zkp_save_keys': "There was an error on IdP saving the public keys. This could mean that there was an"
+                             "unexpected error on the ZKP protocol!"
         }
         return Template(filename='static/error.html').render(message=errors[error_id])
 
@@ -77,10 +79,7 @@ class HelperApp(object):
             self.sso_url = sso_url
             self.sp_client = client
 
-            raise cherrypy.HTTPRedirect(create_get_url(self.sso_url,
-                                                       params={
-                                                           'id_attrs': ','.join(self.id_attrs)
-                                                       }), status=303)
+            raise cherrypy.HTTPRedirect(self.sso_url, status=303)
 
     def asymmetric_auth(self):
         nonce_to_send = create_nonce()
@@ -169,6 +168,11 @@ class HelperApp(object):
                     'key': self.password_manager.get_public_key_str()
                 }))
             })
+
+            if response.status_code != 200:
+                print(f"Error received from idp: <{response.status_code}: {response.reason}>")
+                raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+                                                           params={'error_id': 'zkp_save_keys'}), 301)
 
             response = asymmetric_cipher_auth.decipher_response(self.cipher_auth.decipher_response(response.json()))
             if 'status' in response and bool(response['status']):

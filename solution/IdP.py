@@ -50,23 +50,12 @@ class IdP(Asymmetric_IdP):
 		self.hostname = hostname
 		self.port = port
 
-	def create_attr_response(self, zkp: ZKP_IdP):
-		response_dict = dict()
-		if 'username' in zkp.id_attrs:
-			response_dict['username'] = zkp.username
-		'''add here more attributes if needed'''
-
-		zkp.response_b64 = base64.urlsafe_b64encode(json.dumps(response_dict).encode())
-		zkp.response_signature_b64 = base64.urlsafe_b64encode(self.sign(zkp.response_b64))
-
 	@cherrypy.expose
-	def login(self, id_attrs: str):
-		attrs = id_attrs.split(',')
+	def login(self):
 		client_id = str(uuid.uuid4())
 
 		aes_key = urandom(32)
-		zkp_values[client_id] = ZKP_IdP(key=aes_key, id_attrs=attrs,
-		                                max_iterations=MAX_ITERATIONS_ALLOWED)
+		zkp_values[client_id] = ZKP_IdP(key=aes_key, max_iterations=MAX_ITERATIONS_ALLOWED)
 		raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/authenticate",
 		                                           params={
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
@@ -104,8 +93,6 @@ class IdP(Asymmetric_IdP):
 		challenge_response = current_zkp.response(challenge)
 		nonce = current_zkp.create_challenge()
 
-		if current_zkp.iteration >= current_zkp.max_iterations*2 and current_zkp.all_ok:
-			self.create_attr_response(current_zkp)
 		return current_zkp.create_response({
 			'nonce': nonce,
 			'response': challenge_response
@@ -113,69 +100,77 @@ class IdP(Asymmetric_IdP):
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
-	def authenticate_asymmetric(self, **kwargs):
-		client_id = kwargs['client']
-		current_zkp = zkp_values[client_id]
-		request_args = current_zkp.decipher_response(kwargs)
-		if client_id not in public_key_values:
-			user_id = request_args['user_id']
-			username = request_args['username']
-			nonce_received = request_args['nonce'].encode()
-
-			public_key_db = get_user_key(id=user_id, username=username)
-			if public_key_db and len(public_key_db) > 0:
-				if public_key_db[1] > datetime.now().timestamp():           # verify if the key is not expired
-					public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
-
-					# create response to the challenge
-					challenge_response = public_key.encrypt(nonce_received, padding=asymmetric_padding_encryption())
-
-					current_zkp.username = username
-					nonce = create_nonce()
-					public_key_values[client_id] = (public_key, nonce)
-					return current_zkp.create_response({
-						'nonce': nonce.decode(),
-						'response': base64.urlsafe_b64encode(challenge_response).decode()
-					})
-				else:
-					raise cherrypy.HTTPError(410, message="Expired key")
-			else:
-				raise cherrypy.HTTPError(424, message="No public key for the given user id and username")
-		else:
-			response = base64.urlsafe_b64decode(request_args['response'])
-
-			public_key, nonce = public_key_values[client_id]
-			try:
-				public_key.verify(signature=response, data=nonce,
-				                  padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
-				self.create_attr_response(current_zkp)
-			except InvalidSignature:
-				del current_zkp
-				del public_key_values[client_id]
-				raise cherrypy.HTTPError(401, message="Authentication failed")
-
-	@cherrypy.expose
-	@cherrypy.tools.json_out()
 	def save_asymmetric(self, **kwargs):
 		client_id = kwargs['client']
 		current_zkp = zkp_values[client_id]
 
-		key = asymmetric_upload_derivation_key(current_zkp.responses, current_zkp.iteration, 32)
-		asymmetric_cipher_auth = Cipher_Authentication(key=key)
+		if current_zkp.iteration >= current_zkp.max_iterations * 2 and current_zkp.all_ok:
+			key = asymmetric_upload_derivation_key(current_zkp.responses, current_zkp.iteration, 32)
+			asymmetric_cipher_auth = Cipher_Authentication(key=key)
 
-		request_args = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))
-		key = request_args['key']
-		user_id = str(uuid.uuid4())
-		status = False
-		if current_zkp.response_b64:
-			status = save_user_key(id=user_id, username=current_zkp.username,
-			                       key=key,
-			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
-		return current_zkp.create_response(asymmetric_cipher_auth.create_response({
-			'status': status,
-			'ttl': KEYS_TIME_TO_LIVE,
-			'user_id': user_id
-		}))
+			request_args = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))
+			key = request_args['key']
+			user_id = str(uuid.uuid4())
+			status = False
+			if current_zkp.response_b64:
+				status = save_user_key(id=user_id, username=current_zkp.username,
+				                       key=key,
+				                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
+			return current_zkp.create_response(asymmetric_cipher_auth.create_response({
+				'status': status,
+				'ttl': KEYS_TIME_TO_LIVE,
+				'user_id': user_id
+			}))
+		else:
+			raise cherrypy.HTTPError(401, message="ZKP protocol was not completed")
+
+	@cherrypy.expose
+	@cherrypy.tools.json_out()
+	def authenticate_asymmetric(self, **kwargs):
+		client_id = kwargs['client']
+		current_zkp = zkp_values[client_id]
+		request_args = current_zkp.decipher_response(kwargs)
+
+		user_id = request_args['user_id']
+		username = request_args['username']
+		id_attrs_b64 = request_args['id_attrs'].encode()
+		id_attrs_signature_b64 = base64.urlsafe_b64decode(request_args['signature'])
+
+		public_key_db = get_user_key(id=user_id, username=username)
+		if public_key_db and len(public_key_db) > 0:
+			if public_key_db[1] > datetime.now().timestamp():  # verify if the key is not expired
+				public_key = load_pem_public_key(data=public_key_db[0].encode(), backend=default_backend())
+
+				# verify if the signature is valid
+				try:
+					public_key.verify(signature=id_attrs_signature_b64, data=id_attrs_b64,
+				                      padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
+				except InvalidSignature:
+					del current_zkp
+					raise cherrypy.HTTPError(401, message="Authentication failed")
+
+				id_attrs = json.loads(base64.urlsafe_b64decode(id_attrs_b64))
+
+				response_dict = dict()
+				if 'username' in id_attrs:
+					response_dict['username'] = username
+				'''add here more attributes if needed'''
+
+				response_b64 = base64.urlsafe_b64encode(json.dumps(response_dict).encode())
+				response_signature_b64 = base64.urlsafe_b64encode(self.sign(response_b64))
+
+				response = public_key.encrypt(base64.urlsafe_b64encode(json.dumps({
+					'response': response_b64,
+					'signature': response_signature_b64
+				})), padding=asymmetric_padding_encryption())
+
+				return current_zkp.create_response({
+					'response': response
+				})
+			else:
+				raise cherrypy.HTTPError(410, message="Expired key")
+		else:
+			raise cherrypy.HTTPError(424, message="No public key for the given user id and username")
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
