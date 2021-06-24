@@ -111,11 +111,9 @@ class IdP(Asymmetric_IdP):
 			request_args = asymmetric_cipher_auth.decipher_response(current_zkp.decipher_response(kwargs))
 			key = request_args['key']
 			user_id = str(uuid.uuid4())
-			status = False
-			if current_zkp.response_b64:
-				status = save_user_key(id=user_id, username=current_zkp.username,
-				                       key=key,
-				                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
+			status = save_user_key(id=user_id, username=current_zkp.username,
+			                       key=key,
+			                       not_valid_after=(datetime.now() + timedelta(minutes=KEYS_TIME_TO_LIVE)).timestamp())
 			return current_zkp.create_response(asymmetric_cipher_auth.create_response({
 				'status': status,
 				'ttl': KEYS_TIME_TO_LIVE,
@@ -159,32 +157,27 @@ class IdP(Asymmetric_IdP):
 				response_b64 = base64.urlsafe_b64encode(json.dumps(response_dict).encode())
 				response_signature_b64 = base64.urlsafe_b64encode(self.sign(response_b64))
 
-				response = public_key.encrypt(base64.urlsafe_b64encode(json.dumps({
-					'response': response_b64,
-					'signature': response_signature_b64
-				})), padding=asymmetric_padding_encryption())
+				aes_key = urandom(32)
+				iv = urandom(16)
+				new_cipher = Cipher_Authentication(aes_key)
+				ciphered_aes_key = base64.urlsafe_b64encode(public_key.encrypt(
+					aes_key, padding=asymmetric_padding_encryption()
+				))
+				response = new_cipher.cipher_data({
+						'response': response_b64.decode(),
+						'signature': response_signature_b64.decode()
+					},
+					iv=iv)
 
 				return current_zkp.create_response({
+					'ciphered_aes_key': ciphered_aes_key.decode(),
+					'iv': base64.urlsafe_b64encode(iv).decode(),
 					'response': response
 				})
 			else:
 				raise cherrypy.HTTPError(410, message="Expired key")
 		else:
 			raise cherrypy.HTTPError(424, message="No public key for the given user id and username")
-
-	@cherrypy.expose
-	@cherrypy.tools.json_out()
-	def identity(self, **kwargs):
-		client_id = kwargs['client']
-		current_zkp = zkp_values[client_id]
-
-		response = current_zkp.create_response({
-			'response': current_zkp.response_b64.decode(),
-			'signature': current_zkp.response_signature_b64.decode()
-		})
-		del current_zkp
-
-		return response
 
 
 if __name__ == '__main__':

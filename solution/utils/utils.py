@@ -88,9 +88,6 @@ class ZKP_IdP(ZKP, Cipher_Authentication):
 		self.id_attrs = list()
 		self.max_iterations = max_iterations
 
-		self.response_b64 = b''
-		self.response_signature_b64 = b''
-
 
 def create_get_url(url: str, params: dict = None):
 	prepare = PreparedRequest()

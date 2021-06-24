@@ -81,11 +81,14 @@ class HelperApp(object):
 
             raise cherrypy.HTTPRedirect(self.sso_url, status=303)
 
-    def asymmetric_auth(self):
-        nonce_to_send = create_nonce()
+    def asymmetric_identification(self):
+        id_attrs_b64 = base64.urlsafe_b64encode(json.dumps(self.id_attrs).encode())
+        id_attrs_signature_b64 = base64.urlsafe_b64encode(self.password_manager.sign(id_attrs_b64))
+
         ciphered_params = self.cipher_auth.create_response({
             'user_id': self.password_manager.user_id,
-            'nonce': nonce_to_send.decode(),
+            'id_attrs': id_attrs_b64.decode(),
+            'signature': id_attrs_signature_b64.decode(),
             'username': self.password_manager.username
         })
         response = requests.get(f"{self.idp}/authenticate_asymmetric",
@@ -98,25 +101,18 @@ class HelperApp(object):
             self.zkp_auth()
         else:
             response_dict = self.cipher_auth.decipher_response(response.json())
+            aes_key = self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['ciphered_aes_key']))
+            iv = base64.urlsafe_b64decode(response_dict['iv'])
+            new_cipher = Cipher_Authentication(aes_key)
 
-            # verify the authenticity of the IdP
-            if ('response' not in response_dict
-                    or nonce_to_send != self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['response']))):
-                raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
-                                                           params={'error_id': 'asymmetric_challenge'}), 301)
-            else:
-                nonce = response_dict['nonce'].encode()
-                challenge_response = self.password_manager.sign(nonce)
-                response = requests.get(f"{self.idp}/authenticate_asymmetric",
-                                        params={
-                                            'client': self.idp_client,
-                                            **self.cipher_auth.create_response({
-                                                'response': base64.urlsafe_b64encode(challenge_response).decode()
-                                            })
-                                        })
-                if response.status_code != 200:
-                    print(f"Error status: {response.status_code}")
-                    self.zkp_auth()
+            response_dict_attrs = new_cipher.decipher_data(
+                data=response_dict['response'],
+                iv=iv
+            )
+            self.response_attrs_b64 = response_dict_attrs['response']
+            self.response_signature_b64 = response_dict_attrs['signature']
+
+        raise cherrypy.HTTPRedirect("/attribute_presentation", 303)
 
     def zkp_auth(self):
         zkp = ZKP(self.password_manager.password)
@@ -181,16 +177,8 @@ class HelperApp(object):
             raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
                                                        params={'error_id': 'zkp_auth_error'}), 301)
 
-    def request_attributes_end(self):
-        response = requests.get(f"{self.idp}/identity",
-                                params={
-                                    'client': self.idp_client,
-                                })
-        response_dict = self.cipher_auth.decipher_response(response.json())
-        self.response_attrs_b64 = response_dict['response']
-        self.response_signature_b64 = response_dict['signature']
-
-        raise cherrypy.HTTPRedirect("/attribute_presentation", 303)
+        # in the end, we request the attributes with the new key pair
+        self.asymmetric_identification()
 
     @cherrypy.expose
     def keychain(self, username: str, password: str):
@@ -212,9 +200,7 @@ class HelperApp(object):
             if not self.password_manager.load_private_key():
                 self.zkp_auth()
             else:
-                self.asymmetric_auth()
-
-        self.request_attributes_end()
+                self.asymmetric_identification()
 
     @cherrypy.expose
     def attribute_presentation(self):
