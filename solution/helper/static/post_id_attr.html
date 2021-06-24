@@ -4,19 +4,20 @@
     <meta charset="UTF-8">
 </head>
 <body onload="document.forms[0].submit()">
-    <noscript>
-      <p>
+<noscript>
+    <p>
         <strong>Note:</strong>
         Since your browser does not support JavaScript,
         you must press the Continue button once to proceed.
-      </p>
-    </noscript>
-    <form action="${consumer_url}" method="post">
-      <input type="hidden" name="response" value="${response}"/>
-      <input type="hidden" name="signature" value="${signature}"/>
-      <noscript>
+    </p>
+</noscript>
+<form action="${consumer_url}" method="post">
+    <input type="hidden" name="response" value="${response}"/>
+    <input type="hidden" name="signature" value="${signature}"/>
+    <input type="hidden" name="client" value="${client}"/>
+    <noscript>
         <input type="submit" value="Continue"/>
-      </noscript>
-    </form>
-  </body>
+    </noscript>
+</form>
+</body>
 </html>

@@ -50,15 +50,14 @@ class IdP(Asymmetric_IdP):
 		self.hostname = hostname
 		self.port = port
 
-	@staticmethod
-	def create_attr_response(zkp: ZKP_IdP):
+	def create_attr_response(self, zkp: ZKP_IdP):
 		response_dict = dict()
 		if 'username' in zkp.id_attrs:
 			response_dict['username'] = zkp.username
 		'''add here more attributes if needed'''
 
 		zkp.response_b64 = base64.urlsafe_b64encode(json.dumps(response_dict).encode())
-		zkp.response_signature_b64 = base64.urlsafe_b64encode(zkp.response_b64)
+		zkp.response_signature_b64 = base64.urlsafe_b64encode(self.sign(zkp.response_b64))
 
 	@cherrypy.expose
 	def login(self, id_attrs: str):

@@ -1,3 +1,4 @@
+import json
 import typing
 import uuid
 from pathlib import Path
@@ -6,10 +7,13 @@ import base64
 import hashlib
 
 import cherrypy
+from cryptography import x509
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.backends import default_backend
 from mako.template import Template
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 
-from utils.utils import create_directory, create_get_url
+from utils.utils import create_directory, create_get_url, asymmetric_padding_signature, asymmetric_hash
 
 COOKIE_TTL = 200            # seconds
 
@@ -50,7 +54,7 @@ saml_settings = {
 }
 
 
-clients_auth: typing.Dict[str, OneLogin_Saml2_Auth] = {}
+clients_auth: typing.Dict[str, dict] = {}
 
 
 # noinspection HttpUrlsUsage
@@ -134,10 +138,10 @@ class SP(object):
 			# login = auth.login()
 			# login_id = auth.get_last_request_id()
 			# clients_auth[login_id] = auth
-			# self.set_cookie('sp_saml_id', login_id)
-
 			client_id = str(uuid.uuid4())
-			clients_auth[client_id] = False
+			clients_auth[client_id] = dict()
+
+			self.set_cookie('client_id', client_id)
 
 			raise cherrypy.HTTPRedirect(create_get_url("http://zkp_helper_app:1080/login",
 			                                           params={
@@ -153,21 +157,21 @@ class SP(object):
 
 		cookies = cherrypy.request.cookie
 		# if not cookies:
-		if 'sp_saml_id' not in cookies:
+		if 'client_id' not in cookies:
 			if redirect:
 				redirect_to_helper()
 			else:
 				return False
 
-		saml_id = cookies['sp_saml_id'].value
-		if saml_id not in clients_auth or not clients_auth[saml_id].get_attributes():
+		client_id = cookies['client_id'].value
+		if client_id not in clients_auth or not clients_auth[client_id]:
 			if redirect:
 				redirect_to_helper()
 			else:
 				return False
 
-		username = clients_auth[saml_id].get_attributes()['username'][0]
-		self.set_cookie('sp_saml_id', saml_id)  # for keeping the session alive
+		username = clients_auth[client_id]['username']
+		self.set_cookie('client_id', client_id)  # for keeping the session alive
 		return username
 
 	@cherrypy.expose
@@ -190,30 +194,38 @@ class SP(object):
 		return self.static_page('login.html')
 
 	@cherrypy.expose
-	def identity(self, response, signature):
+	def identity(self, response, signature, client):
 		"""Identity provisioning by an IdP
-		:param username:
+		:param client:
+		:param response:
+		:param signature:
 		:return:
 		"""
 		if cherrypy.request.method == 'POST':
-			print(response)
-			print(signature)
-			# cookies = cherrypy.request.cookie
-			# request_id = cookies['sp_saml_id'].value
-#
-			# req = self.prepare_auth_parameter(cherrypy.request)
-			# auth = OneLogin_Saml2_Auth(req, saml_settings)
-			# auth.process_response(request_id=request_id)
-			# errors = auth.get_errors()
-			# if not errors:
-			# 	if auth.is_authenticated():
-			# 		clients_auth[request_id] = auth
-			# 	else:
-			# 		print("Not Authenticated")
-			# else:
-			# 	print(f"Error when processing SAML response: {errors}")
-			# 	print(f"{auth.get_last_error_reason()}")
-		# return Template(filename='static/redirect_index.html').render()
+
+			signature = base64.urlsafe_b64decode(signature)
+
+			# TODO -> MUDAR ISTO
+			try:
+				with open('idp_certificate/server.crt', 'rb') as file:
+					cert_data = file.read()
+				cert = x509.load_pem_x509_certificate(data=cert_data, backend=default_backend())
+				cert.public_key().verify(signature=signature, data=response.encode(),
+				                         padding=asymmetric_padding_signature(), algorithm=asymmetric_hash())
+			except InvalidSignature:
+				del clients_auth[client]
+				return "<h1>Error: Invalid signature from the Identity Provider!</h1>"
+			except Exception as e:
+				del clients_auth[client]
+				print(f"Error in function <{self.identity.__name__}>: <{e}>")
+				return
+			
+			attributes = json.loads(base64.urlsafe_b64decode(response))
+
+			cookies = cherrypy.request.cookie
+			request_id = cookies['client_id'].value
+			clients_auth[request_id] = attributes
+		return Template(filename='static/redirect_index.html').render()
 
 	@cherrypy.expose
 	def account(self) -> str:

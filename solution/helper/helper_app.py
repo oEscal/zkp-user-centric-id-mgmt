@@ -225,7 +225,8 @@ class HelperApp(object):
         elif 'allow' in kwargs:
             return Template(filename='static/post_id_attr.html').render(consumer_url=self.consumer_url,
                                                                         response=self.response_attrs_b64,
-                                                                        signature=self.response_signature_b64)
+                                                                        signature=self.response_signature_b64,
+                                                                        client=self.sp_client)
 
     @cherrypy.expose
     def zkp(self, password: str):
