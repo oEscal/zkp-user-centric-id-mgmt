@@ -1,7 +1,6 @@
 import base64
 import json
 import random
-import uuid
 
 import cherrypy
 import requests
@@ -9,11 +8,10 @@ from mako.template import Template
 
 import sys
 sys.path.append('..')
-
-from managers import Master_Password_Manager, Password_Manager
 from utils.utils import ZKP, overlap_intervals, \
-    Cipher_Authentication, asymmetric_upload_derivation_key, create_nonce, \
-    create_get_url
+    Cipher_Authentication, asymmetric_upload_derivation_key, create_get_url
+from managers import Master_Password_Manager, Password_Manager
+
 
 MIN_ITERATIONS_ALLOWED = 200
 MAX_ITERATIONS_ALLOWED = 500

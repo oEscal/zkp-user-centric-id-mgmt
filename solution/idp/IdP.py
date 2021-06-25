@@ -10,12 +10,15 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_pem_private_key
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
-from saml2.server import Server
 
 from queries import setup_database, get_user, save_user_key, get_user_key
-from utils.utils import ZKP_IdP, create_nonce, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
+
+import sys
+sys.path.append('..')
+from utils.utils import ZKP_IdP, asymmetric_padding_signature, asymmetric_hash, create_get_url, \
 	Cipher_Authentication, \
 	asymmetric_upload_derivation_key, asymmetric_padding_encryption
+
 
 zkp_values: typing.Dict[str, ZKP_IdP] = {}
 public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
@@ -24,7 +27,7 @@ MAX_ITERATIONS_ALLOWED = 1000
 KEYS_TIME_TO_LIVE = 10       # minutes
 
 
-KEY_PATH_NAME = f"idp_certificate/server.key"
+KEY_PATH_NAME = f"idp_keys/server.key"
 
 
 class Asymmetric_IdP(object):
@@ -43,12 +46,8 @@ class Asymmetric_IdP(object):
 
 
 class IdP(Asymmetric_IdP):
-	def __init__(self, hostname, port):
+	def __init__(self):
 		super().__init__()
-
-		self.server = Server("idp_conf")
-		self.hostname = hostname
-		self.port = port
 
 	@cherrypy.expose
 	def login(self):
@@ -187,4 +186,4 @@ if __name__ == '__main__':
 	port = 8082
 	cherrypy.config.update({'server.socket_host': hostname,
 	                        'server.socket_port': port})
-	cherrypy.quickstart(IdP(hostname=hostname, port=port))
+	cherrypy.quickstart(IdP())
