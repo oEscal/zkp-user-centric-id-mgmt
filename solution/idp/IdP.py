@@ -20,14 +20,18 @@ from utils.utils import ZKP_IdP, asymmetric_padding_signature, asymmetric_hash, 
 	asymmetric_upload_derivation_key, asymmetric_padding_encryption
 
 
-zkp_values: typing.Dict[str, ZKP_IdP] = {}
-public_key_values: typing.Dict[str, typing.Tuple[RSAPublicKey, bytes]] = {}
+HOST_NAME = '127.0.0.1'
+HOST_PORT = 8082
+# noinspection HttpUrlsUsage
+HOST_URL = f"http://{HOST_NAME}:{HOST_PORT}"
+
 MIN_ITERATIONS_ALLOWED = 300
 MAX_ITERATIONS_ALLOWED = 1000
 KEYS_TIME_TO_LIVE = 10       # minutes
 
-
 KEY_PATH_NAME = f"idp_keys/server.key"
+
+zkp_values: typing.Dict[str, ZKP_IdP] = {}
 
 
 class Asymmetric_IdP(object):
@@ -60,7 +64,10 @@ class IdP(Asymmetric_IdP):
 			                                           'max_iterations': MAX_ITERATIONS_ALLOWED,
 			                                           'min_iterations': MIN_ITERATIONS_ALLOWED,
 			                                           'client': client_id,
-			                                           'key': base64.urlsafe_b64encode(aes_key)
+			                                           'key': base64.urlsafe_b64encode(aes_key),
+			                                           'auth_url': f"{HOST_URL}/{self.authenticate.__name__}",
+			                                           'save_pk_url': f"{HOST_URL}/{self.save_asymmetric.__name__}",
+			                                           'id_url': f"{HOST_URL}/{self.identification.__name__}"
 		                                           }), 307)
 
 	@cherrypy.expose
@@ -123,7 +130,7 @@ class IdP(Asymmetric_IdP):
 
 	@cherrypy.expose
 	@cherrypy.tools.json_out()
-	def authenticate_asymmetric(self, **kwargs):
+	def identification(self, **kwargs):
 		client_id = kwargs['client']
 		current_zkp = zkp_values[client_id]
 		request_args = current_zkp.decipher_response(kwargs)
@@ -182,8 +189,6 @@ class IdP(Asymmetric_IdP):
 if __name__ == '__main__':
 	setup_database()
 
-	hostname = '127.0.0.1'
-	port = 8082
-	cherrypy.config.update({'server.socket_host': hostname,
-	                        'server.socket_port': port})
+	cherrypy.config.update({'server.socket_host': HOST_NAME,
+	                        'server.socket_port': HOST_PORT})
 	cherrypy.quickstart(IdP())
