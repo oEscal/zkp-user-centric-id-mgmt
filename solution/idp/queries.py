@@ -41,9 +41,3 @@ def setup_database():
                     "not_valid_after real not null,"
                     "foreign key(user) references user(username)"
                     ")")
-        con.execute("CREATE TABLE if not exists sessions ("
-                    "token text primary key,"
-                    "username text not null,"
-                    "expiration_date text not null,"
-                    "foreign key(username) references user(username)"
-                    ")")

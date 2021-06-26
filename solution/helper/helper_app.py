@@ -64,12 +64,15 @@ class HelperApp(object):
 			'zkp_save_keys': "There was an error on IdP saving the public keys. This could mean that there was an "
 			                 "unexpected error on the ZKP protocol!",
 			'zkp_inf_cycle': "The ZKP was already executed one time previously, which means that there was some error "
-			                 "on the identification process!"
+			                 "on the identification process!",
+			'asy_error_decrypt': "There was an error decrypting the data received from the IdP. A possible cause for "
+			                     "this is the IdP we are contacting is not a trusted one!"
 		}
 		return Template(filename='static/error.html').render(message=errors[error_id])
 
 	@cherrypy.expose
 	def login(self, sp: str, idp: str, id_attrs: str, consumer_url: str, sso_url: str, client: str):
+		self.__init__()
 		attrs = id_attrs.split(',')
 		return Template(filename='static/login_attributes.html').render(sp=sp, idp=idp, id_attrs=attrs, sso_url=sso_url,
 		                                                                consumer_url=consumer_url, client=client)
@@ -109,7 +112,13 @@ class HelperApp(object):
 			self.zkp_auth()
 		else:
 			response_dict = self.cipher_auth.decipher_response(response.json())
-			aes_key = self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['ciphered_aes_key']))
+			try:
+				aes_key = self.password_manager.decrypt(base64.urlsafe_b64decode(response_dict['ciphered_aes_key']))
+			except Exception as e:
+				print(f"Error in function <{self.asymmetric_identification.__name__}>: <{e}>")
+				raise cherrypy.HTTPRedirect(create_get_url(f"http://zkp_helper_app:1080/error",
+				                                           params={'error_id': 'asy_error_decrypt'}), 301)
+
 			iv = base64.urlsafe_b64decode(response_dict['iv'])
 			new_cipher = Cipher_Authentication(aes_key)
 

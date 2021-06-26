@@ -21,9 +21,11 @@ Zero-Knowledge password-based authentications with a cache of temporary, asymmet
     $ source venv/bin/activate
 
     # to run the IdP
+    $ cd idp
     $ python IdP.py
 
     # to run the SP
+    $ cd sp
     $ python SP.py
 
     # to run the helper application
@@ -35,6 +37,9 @@ Zero-Knowledge password-based authentications with a cache of temporary, asymmet
     - IdP: http://127.0.0.1:8082
     - SP: http://127.0.0.1:8081
     - helper application: http://127.1.2.3:1080
+
+    However, you can change these values easily in the source code
+
 
  - Take into consideration that the IdP will contact the helper application using the host name `zkp_helper_app`, which means that you must define this host name on your local DNS, linked to the IP `127.1.2.3`. On linux, you just have to had the following line to the `/etc/hosts` file:
     ```bash
