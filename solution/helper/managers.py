@@ -289,8 +289,9 @@ class Password_Manager(object):
         idp_base64 = base64.b64encode(idp.encode()).decode()
 
         # change the password file name
-        rename(f"{KEYS_DIRECTORY}/{previous_idp_user}_secret_{master_username}_{idp_base64}",
-               f"{KEYS_DIRECTORY}/{new_idp_user}_secret_{master_username}_{idp_base64}")
+        password_path = f"{KEYS_DIRECTORY}/{previous_idp_user}_secret_{master_username}_{idp_base64}"
+        if path.exists(password_path):
+            rename(password_path, f"{KEYS_DIRECTORY}/{new_idp_user}_secret_{master_username}_{idp_base64}")
 
         # change the private key file name if exists
         private_key_path = f"{KEYS_DIRECTORY}/{previous_idp_user}_{master_username}_{idp_base64}.pem"
@@ -298,7 +299,8 @@ class Password_Manager(object):
             rename(private_key_path, f"{KEYS_DIRECTORY}/{new_idp_user}_{master_username}_{idp_base64}.pem")
 
     def update_idp_password(self, new_password: bytes) -> bool:
-        if not self.load_password():
+        password_path = f"{KEYS_DIRECTORY}/{self.idp_username}_secret_{self.master_username}_{self.idp_base64}"
+        if not self.load_password() and path.exists(password_path):
             return False
 
         private_key_load_success = self.load_private_key(no_time_verification=True)

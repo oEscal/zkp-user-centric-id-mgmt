@@ -270,6 +270,12 @@ class HelperApp(object):
 		if cherrypy.request.method != 'POST':
 			raise cherrypy.HTTPError(405)
 
+		if not username or not password:
+			return Template(filename='static/select_idp_user.html').render(
+				idp=self.idp,
+				users=self.master_password_manager.get_users_for_idp(self.idp),
+				message='Error: You must enter a new username with a password!')
+
 		# update keychain registered idp users
 		if not self.master_password_manager.add_idp_user(idp_user=username, idp=self.idp):
 			return Template(filename='static/select_idp_user.html').render(
