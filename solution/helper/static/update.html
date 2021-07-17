@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Update Keychain Credentials</title>
+</head>
+<body>
+    <h1>Update Keychain Credentials</h1>
+    <form action="/update" method="post">
+    <label for="username">New Username:</label>
+    <input type="text" id="username" name="username" />
+
+    <label for="password">New Master Password</label>
+    <input type="password" id="password" name="password" />
+    <br>
+    <input type="submit" value="Update" />
+      % if context.get('message', UNDEFINED) is not UNDEFINED:
+        <br>
+        <br>
+        <br>
+        <h4>${message}</h4>
+      % endif
+    </form>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Update IdP credentials</title>
+</head>
+<body>
+<h1>Update the user's Identity Provider credentials saved locally</h1>
+
+<form action="/update_idp_credentials" method="post">
+    <h2>Select the user you want to update:</h2>
+    <br>
+
+    % for idp in idps:
+    <h4>Your local registered users in the Identity Provider '<a href="${idp}">${idp}</a>': </h4>
+
+    % for user in idps[idp]:
+    <label for="${user}">${user}</label>
+    <input type="radio" id="${user}" value="${loop.parent.index}_${loop.index}" name="idp_user">
+    <br>
+    % endfor
+
+    <br>
+    <br>
+    % endfor
+
+    <br>
+    <br>
+    <label for="username">New Username:</label>
+    <input type="text" id="username" name="username"/>
+
+    <label for="password">New Password</label>
+    <input type="password" id="password" name="password"/>
+    <br>
+    <input type="submit" value="Update"/>
+    % if context.get('message', UNDEFINED) is not UNDEFINED:
+    <br>
+    <br>
+    <br>
+    <h4>${message}</h4>
+    % endif
+</form>
+</body>
+</html>

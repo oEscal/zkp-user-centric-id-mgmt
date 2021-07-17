@@ -39,5 +39,5 @@ def setup_database():
                     "user text not null,"
                     "value text not null,"
                     "not_valid_after real not null,"
-                    "foreign key(user) references user(username)"
+                    "foreign key(user) references user(username) on update cascade on delete cascade"
                     ")")

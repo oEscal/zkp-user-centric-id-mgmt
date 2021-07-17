@@ -9,7 +9,6 @@ import cherrypy
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_pem_private_key
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from queries import setup_database, get_user, save_user_key, get_user_key
 
@@ -76,6 +75,11 @@ class IdP(Asymmetric_IdP):
 		client_id = kwargs['client']
 		current_zkp = zkp_values[client_id]
 		request_args = current_zkp.decipher_response(kwargs)
+
+		# restart zkp
+		if 'restart' in request_args and request_args['restart']:
+			zkp_values[client_id] = ZKP_IdP(key=current_zkp.key, max_iterations=MAX_ITERATIONS_ALLOWED)
+			current_zkp = zkp_values[client_id]
 
 		challenge = request_args['nonce'].encode()
 		if current_zkp.iteration < 2:

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Select the IdP user</title>
+</head>
+<body>
+    <h1>Select the user you want to login with</h1>
+
+    <form action="/select_idp_user" method="post">
+      <h3>Your local registered users in the Identity Provider '<a href="${idp}">${idp}</a>': </h3>
+
+      % for user in users:
+      <label for="${user}">${user}</label>
+      <input type="radio" id="${user}" value="${user}" name="idp_user">
+        <br>
+      % endfor
+
+      <br>
+      <br>
+
+    <input type="submit" value="Login" />
+    </form>
+
+    <br>
+      <br>
+    <br>
+      <br>
+    <br>
+      <br>
+
+    <form action="/add_idp_user" method="post">
+      <h3>Or register and login with a new user associated with the Identity Provider '<a href="${idp}">${idp}</a>': </h3>
+
+        <label for="username">Username: </label>
+        <input type="username" id="username" name="username" />
+
+        <label for="password">Password: </label>
+        <input type="password" id="password" name="password" />
+
+      <input type="submit" value="Register and Login" />
+
+        % if context.get('message', UNDEFINED) is not UNDEFINED:
+        <br>
+        <br>
+        <br>
+        <h4>${message}</h4>
+      % endif
+    </form>
+</body>
+</html>

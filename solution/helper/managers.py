@@ -1,8 +1,7 @@
 import base64
 import json
-import uuid
 from datetime import datetime, timedelta
-from os import urandom
+from os import urandom, rename, path
 
 from cryptography.exceptions import InvalidKey
 from cryptography.hazmat.backends import default_backend
@@ -27,16 +26,16 @@ class Master_Password_Manager(object):
     def __init__(self, username: str, master_password: bytes):
         self.username = username
         self.master_password = master_password
+        self.idps = {}
 
         self.create_file_if_not_exist()
 
     def register_user(self) -> bool:
         with open(f"{KEYS_DIRECTORY}/users.json", "r+") as file:
-            users = {}
             try:
                 users = json.load(file)
             except Exception:
-                pass
+                return False
 
             if self.username in users:
                 return False
@@ -47,8 +46,86 @@ class Master_Password_Manager(object):
             users[self.username]['password'] = base64.b64encode(
                 self.derivation_function(salt).derive(self.master_password)
             ).decode()
+
+            users[self.username]['idps'] = {}
+
             file.seek(0, 0)
             json.dump(users, file)
+            file.truncate()
+
+        return True
+
+    def update_user(self, new_username: str = '', new_password: str = '') -> bool:
+        with open(f"{KEYS_DIRECTORY}/users.json", "r+") as file:
+            try:
+                users = json.load(file)
+            except Exception:
+                return False
+
+            # update the username
+            if new_username:
+                if new_username in users:
+                    return False
+                users[new_username] = users.pop(self.username)
+                self.username = new_username
+
+            # update the password
+            if new_password:
+                salt = urandom(AES_KEY_SALT_SIZE)
+                users[self.username]['salt'] = base64.b64encode(salt).decode()
+                users[self.username]['password'] = base64.b64encode(
+                    self.derivation_function(salt).derive(new_password)
+                ).decode()
+
+                self.master_password = new_password
+
+            file.seek(0, 0)
+            json.dump(users, file)
+            file.truncate()
+
+            return True
+
+    def add_idp_user(self, idp_user: str, idp: str) -> bool:
+        with open(f"{KEYS_DIRECTORY}/users.json", "r+") as file:
+            try:
+                users = json.load(file)
+            except Exception:
+                return False
+
+            if idp not in users[self.username]['idps']:
+                users[self.username]['idps'][idp] = []
+
+            if idp_user in users[self.username]['idps'][idp]:
+                return False
+
+            users[self.username]['idps'][idp].append(idp_user)
+            self.idps = users[self.username]['idps']
+
+            file.seek(0, 0)
+            json.dump(users, file)
+            file.truncate()
+
+        return True
+
+    def update_idp_user(self, previous_idp_user: str, idp: str, new_idp_user: str) -> bool:
+        with open(f"{KEYS_DIRECTORY}/users.json", "r+") as file:
+            try:
+                users = json.load(file)
+            except Exception:
+                return False
+
+            if (idp not in self.idps or previous_idp_user not in users[self.username]['idps'][idp]
+                    or new_idp_user in users[self.username]['idps'][idp]):
+                return False
+
+            del users[self.username]['idps'][idp][users[self.username]['idps'][idp].index(previous_idp_user)]
+            users[self.username]['idps'][idp].append(new_idp_user)
+
+            self.idps = users[self.username]['idps']
+
+            file.seek(0, 0)
+            json.dump(users, file)
+            file.truncate()
 
         return True
 
@@ -66,7 +143,14 @@ class Master_Password_Manager(object):
         except InvalidKey:
             return False
 
+        self.idps = users[self.username]['idps']
+
         return True
+
+    def get_users_for_idp(self, idp: str) -> list:
+        if idp not in self.idps:
+            return []
+        return self.idps[idp]
 
     @staticmethod
     def derivation_function(salt) -> Scrypt:
@@ -87,17 +171,20 @@ class Master_Password_Manager(object):
 
 # noinspection PyBroadException,PyTypeChecker
 class Password_Manager(object):
-    def __init__(self, username: str, master_password: bytes, idp: str):
+    def __init__(self, master_username: str, master_password: bytes, idp_user: str, idp: str):
         self.private_key: RSAPrivateKey = None
         self.public_key: RSAPublicKey = None
 
-        self.username = username
+        self.master_username = master_username
         self.master_password = master_password
+
+        self.idp_username = idp_user
         self.idp = idp
         self.idp_base64 = base64.b64encode(idp.encode()).decode()
 
         self.password: bytes = b''
         self.user_id: str = ''
+        self.time_to_live: str = ''
 
         self.salt_private_key: bytes = b''
 
@@ -110,7 +197,8 @@ class Password_Manager(object):
 
     def load_password(self) -> bool:
         try:
-            with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{self.idp_base64}", "rb") as file:
+            with open(f"{KEYS_DIRECTORY}/{self.idp_username}_secret_{self.master_username}_{self.idp_base64}", "rb") \
+                    as file:
                 salt_password = file.read(AES_KEY_SALT_SIZE)
                 iv = file.read(INITIALIZATION_VECTOR_SIZE)
                 ciphered_password = file.read()
@@ -126,25 +214,26 @@ class Password_Manager(object):
         except Exception:
             return False
 
-    def load_private_key(self) -> bool:
+    def load_private_key(self, no_time_verification=False) -> bool:
         try:
-            with open(f"{KEYS_DIRECTORY}/{self.username}_{self.idp_base64}.pem", 'rb') as file:
+            with open(f"{KEYS_DIRECTORY}/{self.idp_username}_{self.master_username}_{self.idp_base64}.pem", 'rb') as file:
                 self.user_id = file.readline().decode().rstrip()
-                time_to_live = float(file.readline())
+                self.time_to_live = float(file.readline())
                 self.salt_private_key = file.read(AES_KEY_SALT_SIZE)
                 pem = file.read()
 
-            if time_to_live > datetime.now().timestamp():
-                self.private_key = load_pem_private_key(
-                    data=pem,
-                    password=self.private_key_secret(),
-                    backend=default_backend()
-                )
-            else:
+            if not no_time_verification and not self.time_to_live > datetime.now().timestamp():
                 return False
 
+            self.private_key = load_pem_private_key(
+                data=pem,
+                password=self.private_key_secret(),
+                backend=default_backend()
+            )
+
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Error in function {self.load_private_key.__name__}: {e}")
             return False
 
     def save_password(self):
@@ -154,7 +243,7 @@ class Password_Manager(object):
         salt_password = urandom(AES_KEY_SALT_SIZE)
         key = aes_key_derivation(self.master_password, salt_password)
         encryptor = aes_cipher(key=key, iv=iv).encryptor()
-        with open(f"{KEYS_DIRECTORY}/{self.username}_secret_{self.idp_base64}", "wb") as file:
+        with open(f"{KEYS_DIRECTORY}/{self.idp_username}_secret_{self.master_username}_{self.idp_base64}", "wb") as file:
             file.write(salt_password)                       # first AES_KEY_SALT_SIZE bytes
             file.write(iv)                                  # first INITIALIZATION_VECTOR_SIZE bytes
 
@@ -167,7 +256,7 @@ class Password_Manager(object):
         self.user_id = user_id
 
         self.salt_private_key = urandom(AES_KEY_SALT_SIZE)
-        with open(f"{KEYS_DIRECTORY}/{self.username}_{self.idp_base64}.pem", 'wb') as file:
+        with open(f"{KEYS_DIRECTORY}/{self.idp_username}_{self.master_username}_{self.idp_base64}.pem", 'wb') as file:
             file.write(f"{self.user_id}\n".encode())
             file.write(f"{(datetime.now() + timedelta(minutes=time_to_live)).timestamp()}\n".encode())
             file.write(self.salt_private_key)  # first AES_KEY_SALT_SIZE bytes
@@ -194,3 +283,35 @@ class Password_Manager(object):
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode()
+
+    @staticmethod
+    def update_idp_username(master_username: str, previous_idp_user: str, new_idp_user: str, idp: str):
+        idp_base64 = base64.b64encode(idp.encode()).decode()
+
+        # change the password file name
+        rename(f"{KEYS_DIRECTORY}/{previous_idp_user}_secret_{master_username}_{idp_base64}",
+               f"{KEYS_DIRECTORY}/{new_idp_user}_secret_{master_username}_{idp_base64}")
+
+        # change the private key file name if exists
+        private_key_path = f"{KEYS_DIRECTORY}/{previous_idp_user}_{master_username}_{idp_base64}.pem"
+        if path.exists(private_key_path):
+            rename(private_key_path, f"{KEYS_DIRECTORY}/{new_idp_user}_{master_username}_{idp_base64}.pem")
+
+    def update_idp_password(self, new_password: bytes) -> bool:
+        if not self.load_password():
+            return False
+
+        private_key_load_success = self.load_private_key(no_time_verification=True)
+
+        self.password = new_password
+        self.save_password()
+
+        if private_key_load_success:
+            self.salt_private_key = urandom(AES_KEY_SALT_SIZE)
+            with open(f"{KEYS_DIRECTORY}/{self.idp_username}_{self.master_username}_{self.idp_base64}.pem", 'wb') as file:
+                file.write(f"{self.user_id}\n".encode())
+                file.write(f"{self.time_to_live}\n".encode())
+                file.write(self.salt_private_key)  # first AES_KEY_SALT_SIZE bytes
+                file.write(self.get_private_key_bytes(secret=self.private_key_secret()))
+
+        return True

@@ -7,6 +7,8 @@
 <body>
     <h1>Keychain Opener</h1>
     <form action="/keychain" method="post">
+    <input hidden="text" id="action" name="action" value="${action}" />
+
     <label for="username">Username</label>
     <input type="text" id="username" name="username" />
 

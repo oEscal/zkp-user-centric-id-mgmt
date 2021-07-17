@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Choose the number of iterations</title>
+</head>
+<body>
+<h1>Choose the number of iterations</h1>
+<form action="/choose_iterations" method="post">
+    <h3>The Identity Provider '<a href="${idp}">${idp}</a>' accepts a number of iterations between <b><u>'${min_iterations}'</u></b>
+        and <b><u>'${max_iterations}'</u></b>. You can choose a number of iterations belonging to this interval or not
+        accept
+        to establish a connection with this Identity Provider:</h3>
+    <br>
+
+    <label for="iterations">Number of iterations:</label>
+    <input type="number" id="iterations" name="iterations"/>
+
+    <br>
+    <button type="submit" name="allow">Allow connection</button>
+    <button type="submit" name="deny">Deny connection</button>
+
+    % if context.get('message', UNDEFINED) is not UNDEFINED:
+    <br>
+    <br>
+    <br>
+    <h4>${message}</h4>
+    % endif
+</form>
+</body>
+</html>
