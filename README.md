@@ -58,14 +58,19 @@ Zero-Knowledge password-based authentications with a cache of temporary, asymmet
        - MAX_ITERATIONS_ALLOWED: the current value is 500, and represents the maximum iterations allowed by the helper application for the ZKP protocol (value of N).
 
  - To register a new user on the helper application, you must access the URL `http://zkp_helper_app:1080/register`.
-    - There is already one registered that you can use: 
-       - Username: `escaleira`
+    - There is already two registered that you can use: 
+       - Usernames: `escaleira`, `ola`
        - Password: `olaadeus`
 
  - To register a new user on the IdP, you must access the SQLite database file `idp.db`, and add a new user to the users table:
     ```sql
     insert into user values ('<username>', '<password>');
     ```
-    - There is already one registered that you can use: 
+    - There is already at least one registered that you can use: 
         - Username: `escaleira`
         - Password: `asfasdjfpoijasdfoijaspodifjajdpoij`
+   
+    - You can find other users that possibly are already saved in the database with the following SQL command:
+       ```sql
+       select * from user;
+       ```
