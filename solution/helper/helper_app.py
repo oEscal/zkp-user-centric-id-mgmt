@@ -72,7 +72,7 @@ class HelperApp(object):
 			                  "You can access the page '<a href=\"/update_idp_user\">/update_idp_user</a>' to update "
 			                  "this user's credentials.",
 			'load_pass_error': "There was an error on loading the selected user credentials. Access the page "
-			                   "'<a href=\"/update_idp_credentials\">update_idp_credentials</a>' to update this user's "
+			                   "'<a href=\"/update_idp_user\">/update_idp_user</a>' to update this user's "
 			                   "local credentials.",
 			'zkp_save_keys': "There was an error on IdP saving the public keys. This could mean that there was an "
 			                 "unexpected error on the ZKP protocol!",
@@ -378,8 +378,15 @@ class HelperApp(object):
 			if 'password' in kwargs and kwargs['password']:
 				password = kwargs['password'].encode()
 
+			prev_username = self.master_password_manager.username
 			if not self.master_password_manager.update_user(new_username=username, new_password=password):
 				return Template(filename='static/update.html').render(message='Error: Error updating the user!')
+
+			# update the key files
+			if username:
+				Password_Manager.update_keychain_user(prev_username=prev_username, new_username=username,
+				                                      idps=self.master_password_manager.idps)
+
 			return Template(filename='static/update.html').render(message='Success: The user was updated with success')
 		else:
 			raise cherrypy.HTTPError(405)

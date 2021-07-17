@@ -285,6 +285,23 @@ class Password_Manager(object):
         ).decode()
 
     @staticmethod
+    def update_keychain_user(prev_username: str, new_username: str, idps: list):
+        for idp in idps:
+            for idp_username in idps[idp]:
+                idp_base64 = base64.b64encode(idp.encode()).decode()
+
+                # change the password file name
+                password_path = f"{KEYS_DIRECTORY}/{idp_username}_secret_{prev_username}_{idp_base64}"
+                if path.exists(password_path):
+                    rename(password_path, f"{KEYS_DIRECTORY}/{idp_username}_secret_{new_username}_{idp_base64}")
+
+                # change the private key file name if exists
+                private_key_path = f"{KEYS_DIRECTORY}/{idp_username}_{prev_username}_{idp_base64}.pem"
+                if path.exists(private_key_path):
+                    print("adeus")
+                    rename(private_key_path, f"{KEYS_DIRECTORY}/{idp_username}_{new_username}_{idp_base64}.pem")
+
+    @staticmethod
     def update_idp_username(master_username: str, previous_idp_user: str, new_idp_user: str, idp: str):
         idp_base64 = base64.b64encode(idp.encode()).decode()
 
